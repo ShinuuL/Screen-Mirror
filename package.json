@@ -16,7 +16,10 @@
     "doctor": "node src/cli.ts doctor",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"test/**/*.test.ts\"",
-    "mcp-install": "node src/cli.ts mcp-install"
+    "mcp-install": "node src/cli.ts mcp-install",
+    "policy": "node src/cli.ts policy",
+    "agents:pause": "node src/cli.ts pause",
+    "agents:resume": "node src/cli.ts resume"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",

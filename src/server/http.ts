@@ -14,6 +14,7 @@ import * as dev from '../core/device.ts';
 import { queryLogcat, clearLogcat, formatEntry, LogcatStream, type Level, type LogEntry } from '../core/logcat.ts';
 import { pasteText } from '../core/scrcpy.ts';
 import { MirrorHub } from './mirror.ts';
+import { loadPolicy, setPaused, POLICY_FILE } from '../core/policy.ts';
 
 const WEB_DIR = join(ROOT, 'web');
 const MIME: Record<string, string> = {
@@ -71,6 +72,16 @@ export async function startServer(host: string, port: number): Promise<ServerHan
 
   const routes: Record<string, Handler> = {
     'GET /api/meta': async ({ res }) => json(res, 200, { root: ROOT, sep, version: '0.1.0' }),
+
+    'GET /api/agents': async ({ res }) => {
+      const p = loadPolicy();
+      json(res, 200, { paused: p.paused, mode: p.mode, file: POLICY_FILE });
+    },
+
+    'POST /api/agents/pause': async ({ res, url }) => {
+      const p = setPaused(url.searchParams.get('on') !== '0');
+      json(res, 200, { paused: p.paused, mode: p.mode, file: POLICY_FILE });
+    },
 
     'GET /api/devices': async ({ res }) => json(res, 200, { devices: tracker.devices, mirroring: hub.active() }),
 

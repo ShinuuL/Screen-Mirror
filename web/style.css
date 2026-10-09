@@ -109,6 +109,8 @@ button, input, select { font: inherit; color: inherit; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip { padding: 2px 10px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 12px; white-space: nowrap; }
 .spacer { flex: 1; }
+.agents-btn { border: 1px solid var(--border); background: var(--surface-2); color: var(--ok); border-radius: 999px; padding: 3px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.agents-btn[data-paused="true"] { background: var(--err); border-color: var(--err); color: #fff; }
 .pill { padding: 3px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--surface-2); color: var(--muted); }
 .pill[data-state="live"] { color: var(--ok); }
 .pill[data-state="busy"] { color: var(--warn); }

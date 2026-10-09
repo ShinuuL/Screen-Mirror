@@ -367,3 +367,21 @@ for (const b of document.querySelectorAll('[data-copy]')) {
     }
   });
 }
+
+// ------------------------------------------------------------------ pausa dos agentes de IA
+async function refreshAgents(res) {
+  try {
+    const a = await (res ?? fetch('/api/agents')).then((r) => r.json());
+    const btn = $('agents-btn');
+    btn.dataset.paused = String(a.paused);
+    btn.textContent = a.paused ? 'Agentes pausados' : `Agentes: ${a.mode === 'read-only' ? 'só leitura' : 'liberados'}`;
+    btn.title = `${a.paused ? 'Liberar' : 'Pausar'} os agentes de IA (MCP). Regras: ${a.file}`;
+  } catch {}
+}
+$('agents-btn').addEventListener('click', () => {
+  const pause = $('agents-btn').dataset.paused !== 'true';
+  refreshAgents(fetch(`/api/agents/pause?on=${pause ? 1 : 0}`, { method: 'POST' }));
+  toast(pause ? 'Agentes de IA pausados: nenhuma ação deles chega ao celular.' : 'Agentes de IA liberados conforme as regras.');
+});
+refreshAgents();
+setInterval(refreshAgents, 5000);

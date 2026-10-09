@@ -41,11 +41,21 @@ switch (command) {
   case 'doctor':
     await doctor();
     break;
+  case 'pause':
+  case 'resume':
+  case 'policy': {
+    const { loadPolicy, setPaused, POLICY_FILE, AUDIT_FILE } = await import('./core/policy.ts');
+    const pol = command === 'policy' ? loadPolicy() : setPaused(command === 'pause');
+    console.log(`Agentes: ${pol.paused ? 'PAUSADOS' : 'liberados'} · modo ${pol.mode} · shell ${pol.allowShell ? 'ligado' : 'desligado'} · ${pol.blockedApps.length} apps protegidos`);
+    console.log(`Regras: ${POLICY_FILE}
+Auditoria: ${AUDIT_FILE}`);
+    break;
+  }
   case 'mcp-install':
     mcpInstall();
     break;
   default:
-    console.log('Uso: node src/cli.ts <serve [--open] [--port N] | mcp | mcp-install | doctor>');
+    console.log('Uso: node src/cli.ts <serve [--open] [--port N] | mcp | mcp-install | policy | pause | resume | doctor>');
     process.exit(1);
 }
 

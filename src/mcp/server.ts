@@ -9,6 +9,7 @@ import { listDevices, resolveSerial, run } from '../core/adb.ts';
 import * as dev from '../core/device.ts';
 import { queryLogcat, clearLogcat, formatEntry, LEVELS } from '../core/logcat.ts';
 import { pasteText } from '../core/scrcpy.ts';
+import { loadPolicy, audit, isBlockedApp, inputAllowedIn, pathAllowed, shellAllowed, takeActionSlot, POLICY_FILE } from '../core/policy.ts';
 
 type Content = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
 type Result = { content: Content[]; isError?: boolean };
@@ -33,6 +34,85 @@ const coord = z.number().describe('Coordenada em pixels do aparelho');
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// ---------------------------------------------------------------- política
+
+class PolicyBlock extends Error {}
+
+/** Teclas de saída: sempre permitidas, para o agente conseguir sair de um app bloqueado. */
+const ESCAPE_KEYS = new Set(['HOME', 'BACK', 'APP_SWITCH', 'RECENTS', 'KEYCODE_HOME', 'KEYCODE_BACK', '3', '4', '187']);
+
+/** Resumo dos argumentos para o log de auditoria, sem gravar o texto digitado. */
+function auditArgs(name: string, args: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...args };
+  if (name === 'type_text' && typeof out.text === 'string') out.text = `<${out.text.length} caracteres>`;
+  return out;
+}
+
+async function gate(name: string, kind: 'meta' | 'view' | 'screen' | 'input' | 'system', args: Record<string, any>): Promise<void> {
+  const p = loadPolicy();
+  const deny = (reason: string): never => {
+    audit(p, { tool: name, decision: 'blocked', reason, args: auditArgs(name, args) });
+    throw new PolicyBlock(
+      `Bloqueado pela política do usuário: ${reason}. Não tente contornar; peça ao usuário para ajustar ${POLICY_FILE} se for necessário.`,
+    );
+  };
+
+  if (kind !== 'meta' && p.paused) deny('agentes pausados pelo usuário (paused=true)');
+  if ((kind === 'input' || kind === 'system') && p.mode === 'read-only') deny('modo somente leitura (mode=read-only)');
+
+  if (name === 'list_files' && !pathAllowed(args.path ?? '/sdcard', p)) {
+    deny(`pasta fora de filePaths (${p.filePaths.join(', ')})`);
+  }
+
+  if (name === 'open_app') {
+    if (isBlockedApp(args.package, p)) deny(`o app ${args.package} está em blockedApps`);
+    if (p.allowedApps.length && inputAllowedIn(args.package, p)) deny(`o app ${args.package} não está em allowedApps`);
+  }
+
+  if (kind === 'screen' || kind === 'input') {
+    const serial = await resolveSerial(args.serial);
+    const escaping = name === 'press_key' && ESCAPE_KEYS.has(String(args.key).toUpperCase());
+    if (!escaping) {
+      const fg = (await dev.currentApp(serial)).package;
+      if (kind === 'screen' && isBlockedApp(fg, p)) deny(`a tela atual é de um app protegido (${fg})`);
+      if (kind === 'input') {
+        const why = inputAllowedIn(fg, p);
+        if (why) deny(why);
+      }
+    }
+    if (kind === 'input' && !takeActionSlot(p)) deny(`limite de ${p.maxActionsPerMinute} ações por minuto atingido`);
+  }
+
+  if (kind === 'system') {
+    switch (name) {
+      case 'shell': {
+        const why = shellAllowed(args.command ?? '', p);
+        if (why) deny(why);
+        break;
+      }
+      case 'install_apk':
+        if (p.mode !== 'full' || !p.allowInstall) deny('instalar apps exige mode=full e allowInstall=true');
+        break;
+      case 'stop_app':
+        if (!p.allowStopApp) deny('encerrar apps desativado (allowStopApp=false)');
+        if (isBlockedApp(args.package, p)) deny(`o app ${args.package} está em blockedApps`);
+        break;
+      case 'push_file': {
+        const remote = args.remote ?? '/sdcard/Download/';
+        if (!p.allowPushFiles) deny('envio de arquivos desativado (allowPushFiles=false)');
+        if (!pathAllowed(remote, p)) deny(`destino fora de filePaths (${p.filePaths.join(', ')})`);
+        break;
+      }
+      case 'pull_file':
+        if (!p.allowPullFiles) deny('cópia de arquivos do celular desativada (allowPullFiles=false)');
+        if (!pathAllowed(args.remote ?? '', p)) deny(`origem fora de filePaths (${p.filePaths.join(', ')})`);
+        break;
+    }
+  }
+
+  audit(p, { tool: name, decision: 'allowed', args: auditArgs(name, args) });
+}
+
 export async function startMcpServer(): Promise<void> {
   const server = new McpServer(
     { name: 'screen-mirror', version: '0.1.0' },
@@ -42,12 +122,24 @@ export async function startMcpServer(): Promise<void> {
         'Fluxo recomendado: ui_tree (barato, dá coordenadas exatas) ou screenshot (visual) -> tap_element/tap/swipe/type_text -> screenshot para conferir.',
         'Todas as coordenadas são em pixels do aparelho. A ferramenta screenshot informa a escala da imagem.',
         'Para depurar apps: logcat com package e level=E, ou buffer=crash para crashes.',
+        'O usuário define regras (apps protegidos, modo, shell, pastas). Quando uma ação for bloqueada pela política, informe o usuário e não tente contorná-la por outros meios (adb direto, outros apps, atalhos).',
       ].join('\n'),
     },
   );
 
-  server.registerTool(
+
+  type Kind = 'meta' | 'view' | 'screen' | 'input' | 'system';
+  // Os handlers recebem os argumentos já validados pelo zod.
+  // Toda ferramenta passa pela política antes de executar; bloqueios voltam como erro legível ao agente.
+  const reg = (name: string, kind: Kind, config: any, cb: (args: any) => Promise<Result>) =>
+    server.registerTool(name, config, safe(async (args: any) => {
+      await gate(name, kind, args ?? {});
+      return cb(args ?? {});
+    }));
+
+  reg(
     'list_devices',
+    'meta',
     { title: 'Listar aparelhos', description: 'Lista celulares conectados via ADB e o estado de cada um (device, unauthorized, offline).', inputSchema: {} },
     safe(async () => {
       const devices = await listDevices();
@@ -56,8 +148,9 @@ export async function startMcpServer(): Promise<void> {
     }),
   );
 
-  server.registerTool(
+  reg(
     'device_info',
+    'view',
     { title: 'Informações do aparelho', description: 'Modelo, versão do Android, resolução, densidade, bateria e app em primeiro plano.', inputSchema: { serial: serialArg } },
     safe(async ({ serial }) => {
       const s = await resolveSerial(serial);
@@ -66,8 +159,9 @@ export async function startMcpServer(): Promise<void> {
     }),
   );
 
-  server.registerTool(
+  reg(
     'screenshot',
+    'screen',
     {
       title: 'Capturar tela',
       description:
@@ -91,8 +185,9 @@ export async function startMcpServer(): Promise<void> {
     }),
   );
 
-  server.registerTool(
+  reg(
     'ui_tree',
+    'screen',
     {
       title: 'Árvore de interface',
       description:
@@ -114,8 +209,9 @@ export async function startMcpServer(): Promise<void> {
     }),
   );
 
-  server.registerTool(
+  reg(
     'tap',
+    'input',
     { title: 'Tocar', description: 'Toca em um ponto da tela (pixels do aparelho).', inputSchema: { serial: serialArg, x: coord, y: coord } },
     safe(async ({ serial, x, y }) => {
       await dev.tap(await resolveSerial(serial), x, y);
@@ -130,8 +226,9 @@ export async function startMcpServer(): Promise<void> {
     exact: z.boolean().optional().describe('Exige correspondência exata.'),
   };
 
-  server.registerTool(
+  reg(
     'tap_element',
+    'input',
     {
       title: 'Tocar em elemento',
       description: 'Localiza um elemento pela árvore de UI (texto, id ou descrição) e toca no centro dele.',
@@ -152,8 +249,9 @@ export async function startMcpServer(): Promise<void> {
     }),
   );
 
-  server.registerTool(
+  reg(
     'wait_for',
+    'screen',
     {
       title: 'Aguardar elemento',
       description: 'Espera um elemento aparecer (ou sumir, com gone=true) na tela. Útil após abrir apps, carregar telas ou enviar formulários.',
@@ -180,8 +278,9 @@ export async function startMcpServer(): Promise<void> {
     }),
   );
 
-  server.registerTool(
+  reg(
     'swipe',
+    'input',
     {
       title: 'Deslizar',
       description: 'Arrasta de (x1,y1) até (x2,y2). Para rolar a lista para baixo, deslize de baixo para cima.',
@@ -193,8 +292,9 @@ export async function startMcpServer(): Promise<void> {
     }),
   );
 
-  server.registerTool(
+  reg(
     'long_press',
+    'input',
     { title: 'Toque longo', description: 'Pressiona e segura um ponto.', inputSchema: { serial: serialArg, x: coord, y: coord, duration_ms: z.number().int().min(100).max(10000).optional() } },
     safe(async ({ serial, x, y, duration_ms }) => {
       await dev.longPress(await resolveSerial(serial), x, y, duration_ms ?? 800);
@@ -202,8 +302,9 @@ export async function startMcpServer(): Promise<void> {
     }),
   );
 
-  server.registerTool(
+  reg(
     'type_text',
+    'input',
     {
       title: 'Digitar texto',
       description:
@@ -220,8 +321,9 @@ export async function startMcpServer(): Promise<void> {
     }),
   );
 
-  server.registerTool(
+  reg(
     'press_key',
+    'input',
     {
       title: 'Pressionar tecla',
       description: `Tecla do sistema por nome (${['HOME', 'BACK', 'APP_SWITCH', 'ENTER', 'DEL', 'POWER', 'VOLUME_UP', 'VOLUME_DOWN', 'TAB', 'ESCAPE', 'WAKEUP', 'SLEEP', 'MENU'].join(', ')}...) ou keycode numérico.`,
@@ -233,8 +335,9 @@ export async function startMcpServer(): Promise<void> {
     }),
   );
 
-  server.registerTool(
+  reg(
     'open_app',
+    'input',
     { title: 'Abrir app', description: 'Abre um app pelo nome do pacote (veja list_apps).', inputSchema: { serial: serialArg, package: z.string() } },
     safe(async ({ serial, package: pkg }) => {
       await dev.startApp(await resolveSerial(serial), pkg);
@@ -242,8 +345,9 @@ export async function startMcpServer(): Promise<void> {
     }),
   );
 
-  server.registerTool(
+  reg(
     'stop_app',
+    'system',
     { title: 'Encerrar app', description: 'Força o encerramento de um app (am force-stop).', inputSchema: { serial: serialArg, package: z.string() }, annotations: { destructiveHint: true } },
     safe(async ({ serial, package: pkg }) => {
       await dev.stopApp(await resolveSerial(serial), pkg);
@@ -251,8 +355,9 @@ export async function startMcpServer(): Promise<void> {
     }),
   );
 
-  server.registerTool(
+  reg(
     'list_apps',
+    'view',
     {
       title: 'Listar apps',
       description: 'Lista pacotes instalados (por padrão só os instalados pelo usuário).',
@@ -265,8 +370,9 @@ export async function startMcpServer(): Promise<void> {
     }),
   );
 
-  server.registerTool(
+  reg(
     'logcat',
+    'view',
     {
       title: 'Ler logcat',
       description:
@@ -289,8 +395,9 @@ export async function startMcpServer(): Promise<void> {
     }),
   );
 
-  server.registerTool(
+  reg(
     'clear_logcat',
+    'system',
     { title: 'Limpar logcat', description: 'Limpa os buffers do logcat — útil antes de reproduzir um bug.', inputSchema: { serial: serialArg } },
     safe(async ({ serial }) => {
       await clearLogcat(await resolveSerial(serial));
@@ -298,8 +405,9 @@ export async function startMcpServer(): Promise<void> {
     }),
   );
 
-  server.registerTool(
+  reg(
     'list_files',
+    'view',
     {
       title: 'Listar arquivos',
       description: 'Lista uma pasta do aparelho. Armazenamento do usuário: /sdcard (Download, DCIM, Documents...).',
@@ -315,8 +423,9 @@ export async function startMcpServer(): Promise<void> {
     }),
   );
 
-  server.registerTool(
+  reg(
     'pull_file',
+    'system',
     {
       title: 'Copiar do celular para o PC',
       description: 'Copia um arquivo ou pasta do aparelho para o computador.',
@@ -329,8 +438,9 @@ export async function startMcpServer(): Promise<void> {
     }),
   );
 
-  server.registerTool(
+  reg(
     'push_file',
+    'system',
     {
       title: 'Copiar do PC para o celular',
       description: 'Envia um arquivo ou pasta do computador para o aparelho.',
@@ -344,8 +454,9 @@ export async function startMcpServer(): Promise<void> {
     }),
   );
 
-  server.registerTool(
+  reg(
     'install_apk',
+    'system',
     { title: 'Instalar APK', description: 'Instala (ou atualiza) um APK do computador no aparelho.', inputSchema: { serial: serialArg, path: z.string() } },
     safe(async ({ serial, path }) => {
       const src = resolvePath(path);
@@ -354,8 +465,9 @@ export async function startMcpServer(): Promise<void> {
     }),
   );
 
-  server.registerTool(
+  reg(
     'shell',
+    'system',
     {
       title: 'Comando shell',
       description: 'Executa um comando no shell do Android (usuário "shell", sem root). Ex.: "dumpsys battery", "pm path com.app", "am start -n ...".',

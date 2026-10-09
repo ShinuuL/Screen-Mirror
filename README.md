@@ -78,6 +78,27 @@ O servidor MCP é independente do painel: funciona com ou sem ele aberto.
 
 Exemplo de pedido ao agente: *"Abra o app com.exemplo, faça login com o usuário teste, e se der erro me mostre o logcat do app com nível E."*
 
+### Regras para agentes
+
+Toda ação de um agente via MCP passa por regras definidas em `~/.screen-mirror/policy.json`, que é criado com padrões seguros na primeira execução. O arquivo é relido a cada ação, então uma edição vale na hora. Se ele estiver inválido, os agentes ficam em somente leitura.
+
+| Regra | Padrão | Efeito |
+|---|---|---|
+| `paused` | `false` | Botão de emergência: bloqueia tudo. Também pelo botão **Agentes** no topo do painel ou `npm run agents:pause` / `agents:resume` |
+| `mode` | `interactive` | `read-only` (só ver), `interactive` (ver, tocar, digitar, abrir apps) ou `full` (também ações de sistema liberadas abaixo) |
+| `blockedApps` | bancos, carteiras, WhatsApp/Telegram, e-mail, redes sociais, galeria/fotos, Play Store, Configurações, gerenciadores de senha | O agente não abre esses apps, não vê a tela deles (screenshot/árvore) e não toca neles. Aceita prefixo com `*` |
+| `allowedApps` | vazio | Se preenchido, toques e digitação só nesses apps (ex.: `["com.mastersys*"]`), além da tela inicial |
+| `allowShell` / `shellAllowPrefixes` | desligado / `dumpsys`, `getprop`, `pm list`… | Comandos só com esses prefixos e sem `;`, `&&`, `\|`, `$()` ou redirecionamentos |
+| `allowInstall` | `false` | Instalar APK exige também `mode: "full"` |
+| `allowStopApp`, `allowPushFiles`, `allowPullFiles` | `true` | Encerrar apps e copiar arquivos |
+| `filePaths` | `/sdcard/Download`, `/data/local/tmp` | Únicas pastas que o agente lista, lê ou grava |
+| `maxActionsPerMinute` | `60` | Limite de toques, teclas e digitação |
+| `audit` | `true` | Cada ação (permitida ou bloqueada) vai para `~/.screen-mirror/audit.log`; o texto digitado não é gravado, só o tamanho |
+
+Voltar, Início e Recentes são sempre permitidos, para o agente conseguir sair de um app protegido. `npm run policy` mostra o resumo e o caminho dos arquivos.
+
+As regras valem para o MCP. Um agente que também tenha acesso ao terminal pode chamar o `adb` diretamente; para impedir isso no Claude Code, adicione `"Bash(adb:*)"` em `permissions.deny` do `~/.claude/settings.json`.
+
 ### API HTTP
 
 Disponível enquanto o painel estiver rodando (apenas em `127.0.0.1`). `serial` é opcional quando há um único aparelho.
