@@ -1,0 +1,32 @@
+{
+  "name": "screen-mirror",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Espelhamento e controle de celulares Android via ADB, com painel web local e servidor MCP para agentes de IA.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "postinstall": "node scripts/fetch-server.ts",
+    "setup": "node scripts/fetch-server.ts",
+    "start": "node src/cli.ts serve --open",
+    "serve": "node src/cli.ts serve",
+    "mcp": "node src/cli.ts mcp",
+    "doctor": "node src/cli.ts doctor",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "mcp-install": "node src/cli.ts mcp-install"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "sharp": "^0.35.5",
+    "ws": "^8.22.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "@types/ws": "^8.18.1",
+    "typescript": "^7.0.2"
+  }
+}

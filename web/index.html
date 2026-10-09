@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Screen Mirror</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232f7cf6' stroke-width='2' stroke-linecap='round'%3E%3Crect x='6' y='2' width='12' height='20' rx='2'/%3E%3Cpath d='M11 18h2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="icon" data-icon="phone"></span>Screen Mirror</div>
+    <label class="device-picker">
+      <span class="sr-only">Aparelho</span>
+      <select id="device-select" aria-label="Aparelho"></select>
+    </label>
+    <div id="device-info" class="chips"></div>
+    <div class="spacer"></div>
+    <span id="conn-status" class="pill" data-state="idle">Sem conexão</span>
+    <button class="icon-btn" id="toggle-panel" title="Esconder painel lateral (Ctrl+Shift+L)" aria-pressed="true" aria-controls="side-panel"><span class="icon" data-icon="sidebar"></span></button>
+  </header>
+
+  <main class="layout">
+    <section class="stage" aria-label="Tela do celular">
+      <div class="screen-row">
+        <div class="screen-wrap" id="screen-wrap">
+          <canvas id="screen" tabindex="0" aria-label="Espelho da tela. Clique para tocar, botão direito volta, roda rola."></canvas>
+          <div class="overlay" id="overlay">
+            <div class="overlay-msg" id="overlay-msg">Aguardando celular…</div>
+            <div class="overlay-hint" id="overlay-hint">Conecte o cabo USB com a depuração USB ativada.</div>
+            <button class="btn" id="retry" hidden>Tentar novamente</button>
+          </div>
+        </div>
+        <nav class="tools" aria-label="Controles do aparelho">
+          <button class="tool" data-action="power" title="Liga/desliga a tela"><span class="icon" data-icon="power"></span></button>
+          <button class="tool" data-action="volup" title="Volume +"><span class="icon" data-icon="volup"></span></button>
+          <button class="tool" data-action="voldown" title="Volume −"><span class="icon" data-icon="voldown"></span></button>
+          <button class="tool" data-action="rotate" title="Girar tela"><span class="icon" data-icon="rotate"></span></button>
+          <button class="tool" data-action="notifications" title="Painel de notificações"><span class="icon" data-icon="bell"></span></button>
+          <button class="tool" data-action="screenshot" title="Salvar captura (PNG)"><span class="icon" data-icon="camera"></span></button>
+          <button class="tool" data-action="displayoff" title="Apagar a tela física (o espelho continua)" aria-pressed="false"><span class="icon" data-icon="moon"></span></button>
+          <button class="tool" data-action="quality" title="Qualidade do vídeo"><span class="icon" data-icon="sliders"></span></button>
+        </nav>
+      </div>
+      <nav class="navbar" aria-label="Navegação Android">
+        <button class="nav" data-action="back" title="Voltar (botão direito do mouse)"><span class="icon" data-icon="back"></span></button>
+        <button class="nav" data-action="home" title="Início (botão do meio)"><span class="icon" data-icon="home"></span></button>
+        <button class="nav" data-action="recents" title="Recentes"><span class="icon" data-icon="recents"></span></button>
+      </nav>
+      <div class="stats" id="stats" aria-live="off"></div>
+    </section>
+
+    <aside class="panel" id="side-panel">
+      <div class="tabs" role="tablist">
+        <button role="tab" class="tab" aria-selected="true" data-tab="logcat">Logcat</button>
+        <button role="tab" class="tab" aria-selected="false" data-tab="files">Arquivos</button>
+        <button role="tab" class="tab" aria-selected="false" data-tab="agents">Agentes de IA</button>
+      </div>
+
+      <div class="tab-body" id="tab-logcat" role="tabpanel">
+        <div class="toolbar">
+          <select id="log-level" aria-label="Nível mínimo" title="Nível mínimo">
+            <option value="V">Verbose</option><option value="D">Debug</option><option value="I">Info</option>
+            <option value="W">Warn</option><option value="E">Error</option>
+          </select>
+          <input id="log-package" list="package-list" placeholder="Pacote (ex.: com.app)" aria-label="Filtrar por pacote" spellcheck="false">
+          <datalist id="package-list"></datalist>
+          <input id="log-search" type="search" placeholder="Buscar (texto ou /regex/)" aria-label="Buscar no log" spellcheck="false">
+          <button class="icon-btn" id="log-pause" title="Pausar" aria-pressed="false"><span class="icon" data-icon="pause"></span></button>
+          <button class="icon-btn" id="log-clear" title="Limpar visualização"><span class="icon" data-icon="erase"></span></button>
+          <button class="icon-btn" id="log-clear-device" title="Limpar logcat no aparelho"><span class="icon" data-icon="trash"></span></button>
+          <button class="icon-btn" id="log-export" title="Exportar linhas filtradas (.txt)"><span class="icon" data-icon="download"></span></button>
+        </div>
+        <div class="log" id="log" role="log" aria-live="off"></div>
+        <div class="log-foot"><span id="log-count">0 linhas</span><label><input type="checkbox" id="log-follow" checked> Acompanhar fim</label></div>
+      </div>
+
+      <div class="tab-body" id="tab-files" role="tabpanel" hidden>
+        <div class="toolbar">
+          <button class="icon-btn" id="files-up" title="Pasta acima"><span class="icon" data-icon="up"></span></button>
+          <input id="files-path" value="/sdcard/Download" aria-label="Caminho" spellcheck="false">
+          <button class="icon-btn" id="files-refresh" title="Atualizar"><span class="icon" data-icon="rotate"></span></button>
+          <button class="icon-btn" id="files-mkdir" title="Nova pasta"><span class="icon" data-icon="folderplus"></span></button>
+          <label class="btn btn-primary" title="Enviar arquivos do PC para esta pasta">
+            <span class="icon" data-icon="upload"></span> Enviar
+            <input type="file" id="files-input" multiple hidden>
+          </label>
+        </div>
+        <div class="shortcuts" id="files-shortcuts"></div>
+        <div class="files" id="files" role="grid" aria-label="Arquivos do aparelho"></div>
+        <div class="transfers" id="transfers"></div>
+      </div>
+
+      <div class="tab-body prose" id="tab-agents" role="tabpanel" hidden>
+        <h2>Conectar um agente de IA</h2>
+        <p>O servidor MCP dá ao agente acesso direto ao celular: captura de tela, árvore de interface, toques e digitação, logcat, arquivos e shell. Ele funciona com ou sem este painel aberto.</p>
+        <h3>Claude Code</h3>
+        <div class="code"><pre id="snippet-claude"></pre><button class="icon-btn copy" data-copy="snippet-claude" title="Copiar"><span class="icon" data-icon="copy"></span></button></div>
+        <h3>Outros clientes MCP (JSON)</h3>
+        <div class="code"><pre id="snippet-json"></pre><button class="icon-btn copy" data-copy="snippet-json" title="Copiar"><span class="icon" data-icon="copy"></span></button></div>
+        <h3>Ferramentas disponíveis</h3>
+        <ul class="tool-list">
+          <li><code>screenshot</code>, <code>ui_tree</code>: ver a tela (imagem ou elementos com coordenadas)</li>
+          <li><code>tap</code>, <code>tap_element</code>, <code>swipe</code>, <code>long_press</code>, <code>type_text</code>, <code>press_key</code></li>
+          <li><code>wait_for</code>: aguardar um elemento aparecer ou sumir</li>
+          <li><code>logcat</code>, <code>clear_logcat</code>: logs por pacote, nível, tag ou regex; <code>buffer=crash</code> para crashes</li>
+          <li><code>list_files</code>, <code>pull_file</code>, <code>push_file</code>, <code>install_apk</code></li>
+          <li><code>open_app</code>, <code>stop_app</code>, <code>list_apps</code>, <code>device_info</code>, <code>shell</code></li>
+        </ul>
+        <h3>API HTTP local</h3>
+        <p>Para scripts e agentes sem MCP (apenas em 127.0.0.1):</p>
+        <div class="code"><pre id="snippet-rest"></pre><button class="icon-btn copy" data-copy="snippet-rest" title="Copiar"><span class="icon" data-icon="copy"></span></button></div>
+      </div>
+    </aside>
+  </main>
+
+  <div class="drop" id="drop" hidden>
+    <div class="drop-box">
+      <span class="icon" data-icon="upload"></span>
+      <strong>Solte para enviar ao celular</strong>
+      <small id="drop-target"></small>
+    </div>
+  </div>
+
+  <dialog id="quality-dialog">
+    <form method="dialog" class="dialog-body">
+      <h2>Qualidade do vídeo</h2>
+      <label>Resolução máxima
+        <select name="maxSize">
+          <option value="1024">1024 px (leve)</option>
+          <option value="1600">1600 px</option>
+          <option value="1920" selected>1920 px</option>
+          <option value="0">Nativa</option>
+        </select>
+      </label>
+      <label>Taxa de bits
+        <select name="bitRate">
+          <option value="4000000">4 Mbps</option>
+          <option value="8000000" selected>8 Mbps</option>
+          <option value="16000000">16 Mbps</option>
+        </select>
+      </label>
+      <label>Quadros por segundo
+        <select name="maxFps">
+          <option value="30">30</option>
+          <option value="60" selected>60</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" name="stayAwake"> Manter tela acordada enquanto espelha</label>
+      <label class="check"><input type="checkbox" name="showTouches"> Mostrar toques no aparelho</label>
+      <div class="dialog-actions">
+        <button class="btn" value="cancel">Cancelar</button>
+        <button class="btn btn-primary" value="apply">Aplicar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
