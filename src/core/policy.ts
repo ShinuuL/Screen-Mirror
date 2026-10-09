@@ -2,6 +2,7 @@
 // Arquivo por usuário (~/.screen-mirror/policy.json), relido a cada ação: editar vale na hora.
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
+import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, statSync, renameSync } from 'node:fs';
 
 export type Mode = 'read-only' | 'interactive' | 'full';
@@ -22,6 +23,8 @@ export interface Policy {
   /** Com allowShell, o comando precisa começar com um destes (vazio = qualquer). */
   shellAllowPrefixes: string[];
   allowInstall: boolean;
+  /** Cada instalação pede confirmação ao usuário numa janela do sistema (o agente não consegue aprovar). */
+  installRequiresConfirmation: boolean;
   allowStopApp: boolean;
   allowPushFiles: boolean;
   allowPullFiles: boolean;
@@ -59,7 +62,8 @@ export const DEFAULT_POLICY: Policy = {
   allowedApps: [],
   allowShell: false,
   shellAllowPrefixes: ['dumpsys', 'getprop', 'pm list', 'pm path', 'wm size', 'wm density', 'pidof', 'ps'],
-  allowInstall: false,
+  allowInstall: true,
+  installRequiresConfirmation: true,
   allowStopApp: true,
   allowPushFiles: true,
   allowPullFiles: true,
@@ -151,4 +155,47 @@ export function audit(p: Policy, entry: Record<string, unknown>): void {
     mkdirSync(dirname(AUDIT_FILE), { recursive: true });
     appendFileSync(AUDIT_FILE, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n');
   } catch {}
+}
+
+// ---------------------------------------------------------------- confirmação do usuário
+
+/**
+ * Pergunta ao usuário numa janela nativa do sistema operacional, fora do alcance do agente.
+ * Sem resposta em `timeoutMs`, ou sem como exibir a janela, a resposta é "não".
+ */
+export function confirmWithUser(title: string, message: string, timeoutMs = 120_000): Promise<boolean> {
+  let cmd: string;
+  let args: string[];
+  // Texto vai por variável de ambiente: nunca é interpretado como código.
+  const env = { ...process.env, SM_TITLE: title, SM_MESSAGE: message };
+  if (process.platform === 'win32') {
+    cmd = 'powershell.exe';
+    args = [
+      '-NoProfile', '-NonInteractive', '-Command',
+      "Add-Type -AssemblyName System.Windows.Forms; " +
+        "[System.Windows.Forms.MessageBox]::Show($env:SM_MESSAGE, $env:SM_TITLE, 'YesNo', 'Warning', 'Button2', 'DefaultDesktopOnly')",
+    ];
+  } else if (process.platform === 'darwin') {
+    cmd = 'osascript';
+    args = ['-e', 'display dialog (system attribute "SM_MESSAGE") with title (system attribute "SM_TITLE") buttons {"Não", "Sim"} default button "Não" with icon caution'];
+  } else {
+    cmd = 'zenity';
+    args = ['--question', '--title', title, '--text', message];
+  }
+  return new Promise((resolve) => {
+    let out = '';
+    const child = spawn(cmd, args, { env, windowsHide: false });
+    const timer = setTimeout(() => child.kill(), timeoutMs);
+    child.stdout?.on('data', (c: Buffer) => (out += c.toString()));
+    child.on('error', () => {
+      clearTimeout(timer);
+      resolve(false);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (process.platform === 'win32') resolve(out.trim() === 'Yes');
+      else if (process.platform === 'darwin') resolve(out.includes('Sim'));
+      else resolve(code === 0);
+    });
+  });
 }

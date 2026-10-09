@@ -9,7 +9,7 @@ import { listDevices, resolveSerial, run } from '../core/adb.ts';
 import * as dev from '../core/device.ts';
 import { queryLogcat, clearLogcat, formatEntry, LEVELS } from '../core/logcat.ts';
 import { pasteText } from '../core/scrcpy.ts';
-import { loadPolicy, audit, isBlockedApp, inputAllowedIn, pathAllowed, shellAllowed, takeActionSlot, POLICY_FILE } from '../core/policy.ts';
+import { loadPolicy, audit, isBlockedApp, inputAllowedIn, pathAllowed, shellAllowed, takeActionSlot, confirmWithUser, POLICY_FILE } from '../core/policy.ts';
 
 type Content = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
 type Result = { content: Content[]; isError?: boolean };
@@ -90,9 +90,28 @@ async function gate(name: string, kind: 'meta' | 'view' | 'screen' | 'input' | '
         if (why) deny(why);
         break;
       }
-      case 'install_apk':
-        if (p.mode !== 'full' || !p.allowInstall) deny('instalar apps exige mode=full e allowInstall=true');
+      case 'install_apk': {
+        if (!p.allowInstall) deny('instalação de apps desativada (allowInstall=false)');
+        const apk = resolvePath(String(args.path ?? ''));
+        if (!existsSync(apk)) break; // o handler devolve o erro de arquivo inexistente
+        if (p.installRequiresConfirmation) {
+          const mb = (statSync(apk).size / 1048576).toFixed(1);
+          const ok = await confirmWithUser(
+            'Screen Mirror — instalar app?',
+            `Um agente de IA quer instalar no celular:
+
+${basename(apk)} (${mb} MB)
+${apk}
+
+Permitir a instalação?`,
+          );
+          if (!ok) deny('o usuário não aprovou a instalação (ou não respondeu em 2 minutos)');
+          audit(p, { tool: name, decision: 'confirmed-by-user', apk });
+        } else if (p.mode !== 'full') {
+          deny('instalar sem confirmação exige mode=full');
+        }
         break;
+      }
       case 'stop_app':
         if (!p.allowStopApp) deny('encerrar apps desativado (allowStopApp=false)');
         if (isBlockedApp(args.package, p)) deny(`o app ${args.package} está em blockedApps`);

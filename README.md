@@ -89,7 +89,7 @@ Toda ação de um agente via MCP passa por regras definidas em `~/.screen-mirror
 | `blockedApps` | bancos, carteiras, WhatsApp/Telegram, e-mail, redes sociais, galeria/fotos, Play Store, Configurações, gerenciadores de senha | O agente não abre esses apps, não vê a tela deles (screenshot/árvore) e não toca neles. Aceita prefixo com `*` |
 | `allowedApps` | vazio | Se preenchido, toques e digitação só nesses apps (ex.: `["com.mastersys*"]`), além da tela inicial |
 | `allowShell` / `shellAllowPrefixes` | desligado / `dumpsys`, `getprop`, `pm list`… | Comandos só com esses prefixos e sem `;`, `&&`, `\|`, `$()` ou redirecionamentos |
-| `allowInstall` | `false` | Instalar APK exige também `mode: "full"` |
+| `allowInstall` / `installRequiresConfirmation` | `true` / `true` | Cada instalação abre uma janela do sistema no PC pedindo sua aprovação; sem clicar **Sim** em 2 minutos, é recusada. O agente não consegue aprovar por você. Sem confirmação, exige `mode: "full"` |
 | `allowStopApp`, `allowPushFiles`, `allowPullFiles` | `true` | Encerrar apps e copiar arquivos |
 | `filePaths` | `/sdcard/Download`, `/data/local/tmp` | Únicas pastas que o agente lista, lê ou grava |
 | `maxActionsPerMinute` | `60` | Limite de toques, teclas e digitação |
