@@ -38,14 +38,14 @@ test('shell: desligado por padrão; com allowShell, só prefixos e sem encadeame
   assert.match(shellAllowed('pmx list', on)!, /shellAllowPrefixes/);
 });
 
-test('instaláveis: só .apk dentro de dist/', async () => {
+test('instaláveis: só .apk dentro de apks/', async () => {
   const { resolveInstallable } = await import('../src/core/policy.ts');
-  const { DIST_DIR } = await import('../src/config.ts');
+  const { APKS_DIR } = await import('../src/config.ts');
   const { writeFileSync, rmSync, mkdirSync } = await import('node:fs');
   const { join } = await import('node:path');
-  mkdirSync(DIST_DIR, { recursive: true });
-  const apk = join(DIST_DIR, '__teste__.apk');
-  const txt = join(DIST_DIR, '__teste__.txt');
+  mkdirSync(APKS_DIR, { recursive: true });
+  const apk = join(APKS_DIR, '__teste__.apk');
+  const txt = join(APKS_DIR, '__teste__.txt');
   writeFileSync(apk, 'x');
   writeFileSync(txt, 'x');
   try {

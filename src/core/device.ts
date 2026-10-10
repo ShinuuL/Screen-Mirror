@@ -1,4 +1,5 @@
 // Operações de alto nível sobre um celular (por serial), usadas pelo painel web e pelo servidor MCP.
+import { createRequire } from 'node:module';
 import { run, shell, execOut, q, AdbError } from './adb.ts';
 
 // ---------------------------------------------------------------- informações
@@ -96,7 +97,8 @@ export async function screenshotForAgent(
   const scale = Math.min(1, maxSize / Math.max(width, height));
   const format = opts.format ?? 'jpeg';
   try {
-    const sharp = (await import('sharp')).default;
+    // createRequire: no executável único, import() só carrega módulos internos; require resolve ao lado do binário.
+    const sharp = createRequire(import.meta.url)('sharp') as typeof import('sharp').default;
     const w = Math.round(width * scale);
     const h = Math.round(height * scale);
     let img = sharp(png).resize(w, h);

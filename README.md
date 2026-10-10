@@ -15,7 +15,23 @@ Espelhe e controle celulares Android no PC só conectando o cabo USB com a **dep
 | Celular | Android 5+ (espelhamento); Android 7+ recomendado. Testado no Android 15 |
 | Navegador | Edge ou Chrome (usa WebCodecs) |
 
-## Instalação
+## Executável (sem Node)
+
+`npm run build` gera em `dist/` pacotes prontos para Windows e Linux (x64):
+
+| Pacote | Conteúdo |
+|---|---|
+| `screen-mirror-<versão>-win-x64.zip` | `ScreenMirror.exe` + painel, scrcpy-server e `sharp` |
+| `screen-mirror-<versão>-linux-x64.tar.gz` | `screen-mirror` (executável) + os mesmos recursos |
+
+Extraia em qualquer pasta. Dois cliques no `ScreenMirror.exe` (ou `./screen-mirror` no Linux) abrem o painel. `ScreenMirror.exe mcp-install` registra o MCP no Claude Code apontando para o executável. Os demais comandos (`mcp`, `doctor`, `pause`, `resume`, `policy`) também funcionam. O `LEIA-ME.txt` do pacote explica o uso.
+
+- O `adb` não vai no pacote, porque a licença do Android SDK não permite redistribuí-lo. Na primeira execução, se a máquina não tiver um, o executável baixa o oficial do Google para `vendor/platform-tools`.
+- O executável embute o Node oficial da mesma versão usada no build (conferido pelo SHA-256 publicado em nodejs.org). Builds para Linux podem ser gerados a partir do Windows e vice-versa: `npm run build -- linux-x64`.
+- Não é assinado digitalmente: no Windows, o SmartScreen pode mostrar "editor desconhecido" na primeira execução.
+- APKs que agentes podem instalar ficam na pasta `apks/` (do projeto ou do pacote).
+
+## Instalação (código-fonte)
 
 ```powershell
 npm install        # baixa o scrcpy-server v5.0.1 (SHA-256 conferido) e, se faltar, o adb
@@ -72,7 +88,7 @@ O servidor MCP é independente do painel: funciona com ou sem ele aberto.
 | `wait_for` | Espera um elemento aparecer ou sumir |
 | `logcat`, `clear_logcat` | Logs por pacote (PID), nível mínimo, tag, regex; `buffer=crash` para crashes |
 | `list_files`, `pull_file`, `push_file` | Transferência de arquivos |
-| `list_installables`, `install_apk` | APKs em `dist/` e instalação (com sua confirmação) |
+| `list_installables`, `install_apk` | APKs em `apks/` e instalação (com sua confirmação) |
 | `open_app`, `stop_app`, `list_apps` | Gerenciar apps |
 | `device_info` | Modelo, Android, resolução, bateria e app em primeiro plano |
 | `shell` | Comando no shell do Android (usuário `shell`, sem root) |
@@ -90,7 +106,7 @@ Toda ação de um agente via MCP passa por regras definidas em `~/.screen-mirror
 | `blockedApps` | bancos, carteiras, WhatsApp/Telegram, e-mail, redes sociais, galeria/fotos, Play Store, Configurações, gerenciadores de senha | O agente não abre esses apps, não vê a tela deles (screenshot/árvore) e não toca neles. Aceita prefixo com `*` |
 | `allowedApps` | vazio | Se preenchido, toques e digitação só nesses apps (ex.: `["com.mastersys*"]`), além da tela inicial |
 | `allowShell` / `shellAllowPrefixes` | desligado / `dumpsys`, `getprop`, `pm list`… | Comandos só com esses prefixos e sem `;`, `&&`, `\|`, `$()` ou redirecionamentos |
-| `allowInstall` / `installRequiresConfirmation` | `true` / `true` | O agente só instala APKs da pasta **`dist/`** do projeto (`list_installables` mostra quais), e cada instalação abre uma janela do sistema no PC pedindo sua aprovação; sem **Sim** em 2 minutos, é recusada. Caminhos fora de `dist/` são recusados. Sem confirmação, exige `mode: "full"` |
+| `allowInstall` / `installRequiresConfirmation` | `true` / `true` | O agente só instala APKs da pasta **`apks/`** do projeto (`list_installables` mostra quais), e cada instalação abre uma janela do sistema no PC pedindo sua aprovação; sem **Sim** em 2 minutos, é recusada. Caminhos fora de `apks/` são recusados. Sem confirmação, exige `mode: "full"` |
 | `allowStopApp`, `allowPushFiles`, `allowPullFiles` | `true` | Encerrar apps e copiar arquivos |
 | `filePaths` | `/sdcard/Download`, `/data/local/tmp` | Únicas pastas que o agente lista, lê ou grava |
 | `maxActionsPerMinute` | `60` | Limite de toques, teclas e digitação |

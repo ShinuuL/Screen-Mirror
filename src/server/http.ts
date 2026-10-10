@@ -8,7 +8,7 @@ import { join, extname, normalize, basename, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { ROOT } from '../config.ts';
+import { ROOT, IS_SEA } from '../config.ts';
 import { DeviceTracker, resolveSerial, spawnAdb, shell, q, AdbError } from '../core/adb.ts';
 import * as dev from '../core/device.ts';
 import { queryLogcat, clearLogcat, formatEntry, LogcatStream, type Level, type LogEntry } from '../core/logcat.ts';
@@ -71,7 +71,7 @@ export async function startServer(host: string, port: number): Promise<ServerHan
   };
 
   const routes: Record<string, Handler> = {
-    'GET /api/meta': async ({ res }) => json(res, 200, { root: ROOT, sep, version: '0.1.0' }),
+    'GET /api/meta': async ({ res }) => json(res, 200, { root: ROOT, sep, version: '0.1.0', exe: IS_SEA ? process.execPath : null }),
 
     'GET /api/agents': async ({ res }) => {
       const p = loadPolicy();

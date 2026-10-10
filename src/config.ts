@@ -2,7 +2,10 @@ import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+/** Executável único (build em dist/): os recursos ficam ao lado do binário. */
+export const IS_SEA = await import('node:sea').then((m) => m.isSea()).catch(() => false);
+
+export const ROOT = IS_SEA ? dirname(process.execPath) : join(dirname(fileURLToPath(import.meta.url)), '..');
 
 // A versão do cliente precisa ser idêntica à do scrcpy-server, senão ele recusa a conexão.
 export const SCRCPY_VERSION = '5.0.1';
@@ -13,7 +16,7 @@ export const SCRCPY_SERVER_LOCAL = join(ROOT, 'vendor', `scrcpy-server-v${SCRCPY
 export const SCRCPY_SERVER_REMOTE = `/data/local/tmp/screen-mirror-server-${SCRCPY_VERSION}.jar`;
 
 /** Pasta dos APKs que agentes podem instalar (o conteúdo não vai para o git). */
-export const DIST_DIR = join(ROOT, 'dist');
+export const APKS_DIR = join(ROOT, 'apks');
 
 export const HOST = process.env.SM_HOST ?? '127.0.0.1';
 export const PORT = Number(process.env.SM_PORT ?? 7380);

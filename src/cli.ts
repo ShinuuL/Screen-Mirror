@@ -2,14 +2,24 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { HOST, PORT, ROOT, SCRCPY_SERVER_LOCAL, SCRCPY_VERSION } from './config.ts';
+import { HOST, PORT, ROOT, IS_SEA, SCRCPY_SERVER_LOCAL, SCRCPY_VERSION } from './config.ts';
 
-const [command = 'serve', ...rest] = process.argv.slice(2);
+const argv = process.argv.slice(2);
+// Duplo clique no executável: abre o painel.
+const [command = 'serve', ...rest] = argv.length || !IS_SEA ? argv : ['serve', '--open'];
 const flag = (name: string) => rest.includes(`--${name}`);
 const option = (name: string) => {
   const i = rest.indexOf(`--${name}`);
   return i >= 0 ? rest[i + 1] : undefined;
 };
+
+// Máquina sem adb (comum no executável): baixa na primeira execução. Logs no stderr (stdout é do MCP).
+if (command === 'serve' || command === 'mcp' || command === 'doctor') {
+  const { ensureAdb } = await import('./core/setup.ts');
+  await ensureAdb((m) => process.stderr.write(`${m}\n`)).catch((err: Error) =>
+    process.stderr.write(`Não foi possível baixar o adb: ${err.message}. Instale o Android platform-tools ou defina ADB_PATH.\n`),
+  );
+}
 
 switch (command) {
   case 'serve': {
@@ -82,10 +92,11 @@ function openAppWindow(url: string): void {
 /** Registra o servidor MCP no Claude Code (escopo do usuário) com os caminhos desta máquina. */
 function mcpInstall(): void {
   const cli = join(ROOT, 'src', 'cli.ts');
-  const config = { command: process.execPath, args: [cli, 'mcp'] };
+  const config = IS_SEA ? { command: process.execPath, args: ['mcp'] } : { command: process.execPath, args: [cli, 'mcp'] };
   // Via shell porque "claude" é um .cmd no Windows; caminhos entre aspas aceitam espaços.
   spawnSync(`claude mcp remove --scope user screen-mirror`, { stdio: 'ignore', shell: true });
-  const r = spawnSync(`claude mcp add --scope user screen-mirror -- "${process.execPath}" "${cli}" mcp`, { stdio: 'inherit', shell: true });
+  const quoted = [config.command, ...config.args].map((a) => (a === 'mcp' ? a : `"${a}"`)).join(' ');
+  const r = spawnSync(`claude mcp add --scope user screen-mirror -- ${quoted}`, { stdio: 'inherit', shell: true });
   if (r.status === 0) {
     console.log('Servidor MCP "screen-mirror" registrado no Claude Code para este usuário.');
     return;
@@ -115,7 +126,7 @@ async function doctor(): Promise<void> {
   else bad(`scrcpy-server ausente — rode "npm run setup" (sem ele não há espelhamento ao vivo)`);
 
   try {
-    await import('sharp');
+    (await import('node:module')).createRequire(import.meta.url)('sharp');
     ok('sharp (redução de screenshots para agentes)');
   } catch {
     bad('sharp indisponível — screenshots irão em resolução nativa');

@@ -19,7 +19,8 @@
     "mcp-install": "node src/cli.ts mcp-install",
     "policy": "node src/cli.ts policy",
     "agents:pause": "node src/cli.ts pause",
-    "agents:resume": "node src/cli.ts resume"
+    "agents:resume": "node src/cli.ts resume",
+    "build": "node scripts/build.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
@@ -30,6 +31,7 @@
   "devDependencies": {
     "@types/node": "^26.6.4",
     "@types/ws": "^8.18.1",
+    "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
   }
 }

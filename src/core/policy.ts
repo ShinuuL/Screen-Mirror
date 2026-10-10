@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { join, dirname, resolve, relative, isAbsolute, extname, sep } from 'node:path';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, statSync, renameSync, realpathSync, readdirSync } from 'node:fs';
-import { DIST_DIR } from '../config.ts';
+import { APKS_DIR } from '../config.ts';
 
 export type Mode = 'read-only' | 'interactive' | 'full';
 
@@ -201,25 +201,25 @@ export function confirmWithUser(title: string, message: string, timeoutMs = 120_
   });
 }
 
-// ---------------------------------------------------------------- instaláveis (dist/)
+// ---------------------------------------------------------------- instaláveis (apks/)
 
 /**
- * Resolve um APK dentro de dist/. Aceita só o nome (ou subcaminho) e recusa qualquer coisa que,
+ * Resolve um APK dentro de apks/. Aceita só o nome (ou subcaminho) e recusa qualquer coisa que,
  * depois de resolver atalhos/symlinks, aponte para fora da pasta.
  */
 export function resolveInstallable(name: string): string {
-  const base = realpathSync(DIST_DIR);
-  if (!name || isAbsolute(name)) throw new Error(`informe só o nome do APK que está em ${DIST_DIR}`);
+  const base = realpathSync(APKS_DIR);
+  if (!name || isAbsolute(name)) throw new Error(`informe só o nome do APK que está em ${APKS_DIR}`);
   const full = resolve(base, name);
-  if (!existsSync(full)) throw new Error(`"${name}" não existe em ${DIST_DIR}. Use list_installables.`);
+  if (!existsSync(full)) throw new Error(`"${name}" não existe em ${APKS_DIR}. Use list_installables.`);
   const real = realpathSync(full);
-  if (!real.startsWith(base + sep)) throw new Error(`"${name}" aponta para fora de ${DIST_DIR}`);
+  if (!real.startsWith(base + sep)) throw new Error(`"${name}" aponta para fora de ${APKS_DIR}`);
   if (!statSync(real).isFile() || extname(real).toLowerCase() !== '.apk') throw new Error(`"${name}" não é um arquivo .apk`);
   return real;
 }
 
 export function listInstallables(): { name: string; size: number; mtime: Date }[] {
-  mkdirSync(DIST_DIR, { recursive: true });
+  mkdirSync(APKS_DIR, { recursive: true });
   const out: { name: string; size: number; mtime: Date }[] = [];
   const walk = (dir: string) => {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -227,10 +227,10 @@ export function listInstallables(): { name: string; size: number; mtime: Date }[
       if (e.isDirectory()) walk(full);
       else if (e.isFile() && extname(e.name).toLowerCase() === '.apk') {
         const st = statSync(full);
-        out.push({ name: relative(DIST_DIR, full).split(sep).join('/'), size: st.size, mtime: st.mtime });
+        out.push({ name: relative(APKS_DIR, full).split(sep).join('/'), size: st.size, mtime: st.mtime });
       }
     }
   };
-  walk(DIST_DIR);
+  walk(APKS_DIR);
   return out.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
 }

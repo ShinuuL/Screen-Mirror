@@ -344,9 +344,12 @@ window.addEventListener('drop', (ev) => {
 (async () => {
   try {
     const meta = await fetch('/api/meta').then((r) => r.json());
+    // Executável empacotado: o próprio binário é o servidor MCP; no código-fonte, node + cli.ts.
     const cli = `${meta.root}${meta.sep}src${meta.sep}cli.ts`;
-    $('snippet-claude').textContent = `claude mcp add screen-mirror -- node "${cli}" mcp`;
-    $('snippet-json').textContent = JSON.stringify({ mcpServers: { 'screen-mirror': { command: 'node', args: [cli, 'mcp'] } } }, null, 2);
+    const command = meta.exe ?? 'node';
+    const args = meta.exe ? ['mcp'] : [cli, 'mcp'];
+    $('snippet-claude').textContent = `claude mcp add --scope user screen-mirror -- ${[command, ...args].map((a) => (a === 'mcp' ? a : `"${a}"`)).join(' ')}`;
+    $('snippet-json').textContent = JSON.stringify({ mcpServers: { 'screen-mirror': { command, args } } }, null, 2);
     const base = location.origin;
     $('snippet-rest').textContent = [
       `curl ${base}/api/devices`,

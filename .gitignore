@@ -1,5 +1,7 @@
 node_modules/
 vendor/
 *.log
-dist/*
-!dist/LEIA-ME.txt
+apks/*
+!apks/LEIA-ME.txt
+dist/
+.build-cache/
