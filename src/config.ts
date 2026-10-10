@@ -12,6 +12,9 @@ export const SCRCPY_SERVER_URL =
 export const SCRCPY_SERVER_LOCAL = join(ROOT, 'vendor', `scrcpy-server-v${SCRCPY_VERSION}`);
 export const SCRCPY_SERVER_REMOTE = `/data/local/tmp/screen-mirror-server-${SCRCPY_VERSION}.jar`;
 
+/** Pasta dos APKs que agentes podem instalar (o conteúdo não vai para o git). */
+export const DIST_DIR = join(ROOT, 'dist');
+
 export const HOST = process.env.SM_HOST ?? '127.0.0.1';
 export const PORT = Number(process.env.SM_PORT ?? 7380);
 

@@ -9,7 +9,8 @@ import { listDevices, resolveSerial, run } from '../core/adb.ts';
 import * as dev from '../core/device.ts';
 import { queryLogcat, clearLogcat, formatEntry, LEVELS } from '../core/logcat.ts';
 import { pasteText } from '../core/scrcpy.ts';
-import { loadPolicy, audit, isBlockedApp, inputAllowedIn, pathAllowed, shellAllowed, takeActionSlot, confirmWithUser, POLICY_FILE } from '../core/policy.ts';
+import { DIST_DIR } from '../config.ts';
+import { loadPolicy, audit, isBlockedApp, inputAllowedIn, pathAllowed, shellAllowed, takeActionSlot, confirmWithUser, resolveInstallable, listInstallables, POLICY_FILE } from '../core/policy.ts';
 
 type Content = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
 type Result = { content: Content[]; isError?: boolean };
@@ -92,8 +93,12 @@ async function gate(name: string, kind: 'meta' | 'view' | 'screen' | 'input' | '
       }
       case 'install_apk': {
         if (!p.allowInstall) deny('instalação de apps desativada (allowInstall=false)');
-        const apk = resolvePath(String(args.path ?? ''));
-        if (!existsSync(apk)) break; // o handler devolve o erro de arquivo inexistente
+        let apk = '';
+        try {
+          apk = resolveInstallable(String(args.path ?? ''));
+        } catch (err) {
+          deny((err as Error).message);
+        }
         if (p.installRequiresConfirmation) {
           const mb = (statSync(apk).size / 1048576).toFixed(1);
           const ok = await confirmWithUser(
@@ -476,11 +481,24 @@ export async function startMcpServer(): Promise<void> {
   reg(
     'install_apk',
     'system',
-    { title: 'Instalar APK', description: 'Instala (ou atualiza) um APK do computador no aparelho.', inputSchema: { serial: serialArg, path: z.string() } },
-    safe(async ({ serial, path }) => {
-      const src = resolvePath(path);
-      if (!existsSync(src) || !statSync(src).isFile()) throw new Error(`APK não encontrado: ${src}`);
-      return text(await dev.installApk(src, await resolveSerial(serial)));
+    {
+      title: 'Instalar APK',
+      description: 'Instala (ou atualiza) no aparelho um APK da pasta dist/ do Screen Mirror (veja list_installables). O usuário confirma cada instalação.',
+      inputSchema: { serial: serialArg, path: z.string().describe('Nome do APK em dist/, ex.: "meuapp.apk".') },
+    },
+    safe(async ({ serial, path }) => text(await dev.installApk(resolveInstallable(path), await resolveSerial(serial)))),
+  );
+
+  reg(
+    'list_installables',
+    'view',
+    { title: 'APKs disponíveis', description: 'Lista os APKs da pasta dist/, os únicos que podem ser instalados.', inputSchema: {}, annotations: { readOnlyHint: true } },
+    safe(async () => {
+      const apks = listInstallables();
+      if (!apks.length) return text(`Nenhum APK em ${DIST_DIR}. Peça ao usuário para colocar o APK nessa pasta.`);
+      const fmt = (a: { name: string; size: number; mtime: Date }) =>
+        `${a.name}\t${(a.size / 1048576).toFixed(1)} MB\t${a.mtime.toISOString().slice(0, 16).replace('T', ' ')}`;
+      return text(`${DIST_DIR}\n${apks.map(fmt).join('\n')}`);
     }),
   );
 

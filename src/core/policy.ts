@@ -1,9 +1,10 @@
 // Regras que limitam o que agentes de IA podem fazer no celular via MCP.
 // Arquivo por usuário (~/.screen-mirror/policy.json), relido a cada ação: editar vale na hora.
 import { homedir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve, relative, isAbsolute, extname, sep } from 'node:path';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, statSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, statSync, renameSync, realpathSync, readdirSync } from 'node:fs';
+import { DIST_DIR } from '../config.ts';
 
 export type Mode = 'read-only' | 'interactive' | 'full';
 
@@ -198,4 +199,38 @@ export function confirmWithUser(title: string, message: string, timeoutMs = 120_
       else resolve(code === 0);
     });
   });
+}
+
+// ---------------------------------------------------------------- instaláveis (dist/)
+
+/**
+ * Resolve um APK dentro de dist/. Aceita só o nome (ou subcaminho) e recusa qualquer coisa que,
+ * depois de resolver atalhos/symlinks, aponte para fora da pasta.
+ */
+export function resolveInstallable(name: string): string {
+  const base = realpathSync(DIST_DIR);
+  if (!name || isAbsolute(name)) throw new Error(`informe só o nome do APK que está em ${DIST_DIR}`);
+  const full = resolve(base, name);
+  if (!existsSync(full)) throw new Error(`"${name}" não existe em ${DIST_DIR}. Use list_installables.`);
+  const real = realpathSync(full);
+  if (!real.startsWith(base + sep)) throw new Error(`"${name}" aponta para fora de ${DIST_DIR}`);
+  if (!statSync(real).isFile() || extname(real).toLowerCase() !== '.apk') throw new Error(`"${name}" não é um arquivo .apk`);
+  return real;
+}
+
+export function listInstallables(): { name: string; size: number; mtime: Date }[] {
+  mkdirSync(DIST_DIR, { recursive: true });
+  const out: { name: string; size: number; mtime: Date }[] = [];
+  const walk = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.isFile() && extname(e.name).toLowerCase() === '.apk') {
+        const st = statSync(full);
+        out.push({ name: relative(DIST_DIR, full).split(sep).join('/'), size: st.size, mtime: st.mtime });
+      }
+    }
+  };
+  walk(DIST_DIR);
+  return out.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
 }

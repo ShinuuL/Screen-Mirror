@@ -37,3 +37,26 @@ test('shell: desligado por padrão; com allowShell, só prefixos e sem encadeame
   assert.match(shellAllowed('getprop $(rm x)', on)!, /encadeamento/);
   assert.match(shellAllowed('pmx list', on)!, /shellAllowPrefixes/);
 });
+
+test('instaláveis: só .apk dentro de dist/', async () => {
+  const { resolveInstallable } = await import('../src/core/policy.ts');
+  const { DIST_DIR } = await import('../src/config.ts');
+  const { writeFileSync, rmSync, mkdirSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  mkdirSync(DIST_DIR, { recursive: true });
+  const apk = join(DIST_DIR, '__teste__.apk');
+  const txt = join(DIST_DIR, '__teste__.txt');
+  writeFileSync(apk, 'x');
+  writeFileSync(txt, 'x');
+  try {
+    assert.equal(resolveInstallable('__teste__.apk').toLowerCase(), apk.toLowerCase());
+    assert.throws(() => resolveInstallable(apk), /só o nome/, 'caminho absoluto');
+    assert.throws(() => resolveInstallable('../package.json'), /fora de|não é um arquivo|não existe/);
+    assert.throws(() => resolveInstallable('../vendor/../package.json'), /fora de/);
+    assert.throws(() => resolveInstallable('__teste__.txt'), /não é um arquivo .apk/);
+    assert.throws(() => resolveInstallable('nao-existe.apk'), /não existe/);
+  } finally {
+    rmSync(apk);
+    rmSync(txt);
+  }
+});

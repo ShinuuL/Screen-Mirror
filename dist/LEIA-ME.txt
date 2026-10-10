@@ -1,0 +1,1 @@
+# APKs que agentes podem instalar no celular (install_apk). O conteúdo não vai para o git.

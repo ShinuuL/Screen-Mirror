@@ -71,7 +71,8 @@ O servidor MCP é independente do painel: funciona com ou sem ele aberto.
 | `press_key` | `HOME`, `BACK`, `ENTER`, `APP_SWITCH`, `POWER`, volume… ou keycode numérico |
 | `wait_for` | Espera um elemento aparecer ou sumir |
 | `logcat`, `clear_logcat` | Logs por pacote (PID), nível mínimo, tag, regex; `buffer=crash` para crashes |
-| `list_files`, `pull_file`, `push_file`, `install_apk` | Transferência de arquivos e instalação |
+| `list_files`, `pull_file`, `push_file` | Transferência de arquivos |
+| `list_installables`, `install_apk` | APKs em `dist/` e instalação (com sua confirmação) |
 | `open_app`, `stop_app`, `list_apps` | Gerenciar apps |
 | `device_info` | Modelo, Android, resolução, bateria e app em primeiro plano |
 | `shell` | Comando no shell do Android (usuário `shell`, sem root) |
@@ -89,7 +90,7 @@ Toda ação de um agente via MCP passa por regras definidas em `~/.screen-mirror
 | `blockedApps` | bancos, carteiras, WhatsApp/Telegram, e-mail, redes sociais, galeria/fotos, Play Store, Configurações, gerenciadores de senha | O agente não abre esses apps, não vê a tela deles (screenshot/árvore) e não toca neles. Aceita prefixo com `*` |
 | `allowedApps` | vazio | Se preenchido, toques e digitação só nesses apps (ex.: `["com.mastersys*"]`), além da tela inicial |
 | `allowShell` / `shellAllowPrefixes` | desligado / `dumpsys`, `getprop`, `pm list`… | Comandos só com esses prefixos e sem `;`, `&&`, `\|`, `$()` ou redirecionamentos |
-| `allowInstall` / `installRequiresConfirmation` | `true` / `true` | Cada instalação abre uma janela do sistema no PC pedindo sua aprovação; sem clicar **Sim** em 2 minutos, é recusada. O agente não consegue aprovar por você. Sem confirmação, exige `mode: "full"` |
+| `allowInstall` / `installRequiresConfirmation` | `true` / `true` | O agente só instala APKs da pasta **`dist/`** do projeto (`list_installables` mostra quais), e cada instalação abre uma janela do sistema no PC pedindo sua aprovação; sem **Sim** em 2 minutos, é recusada. Caminhos fora de `dist/` são recusados. Sem confirmação, exige `mode: "full"` |
 | `allowStopApp`, `allowPushFiles`, `allowPullFiles` | `true` | Encerrar apps e copiar arquivos |
 | `filePaths` | `/sdcard/Download`, `/data/local/tmp` | Únicas pastas que o agente lista, lê ou grava |
 | `maxActionsPerMinute` | `60` | Limite de toques, teclas e digitação |
