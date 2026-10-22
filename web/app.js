@@ -109,8 +109,9 @@ function setPill(state, text) {
   pill.textContent = text;
 }
 
+// Chave "quality2": os padrões antigos (1920 px / 8 Mbps) borravam letras pequenas.
 function qualityOpts() {
-  return store.get('quality', { maxSize: 1920, bitRate: 8000000, maxFps: 60, stayAwake: false, showTouches: false });
+  return store.get('quality2', { maxSize: 0, bitRate: 16000000, maxFps: 60, audio: true, stayAwake: false, showTouches: false });
 }
 
 function startMirror() {
@@ -136,6 +137,12 @@ mirror.addEventListener('frame', () => !$('overlay').hidden && setOverlay(null))
 mirror.addEventListener('resize', fitCanvas);
 mirror.addEventListener('stats', ({ detail }) => {
   $('stats').textContent = mirror.connected ? `${mirror.width}×${mirror.height} · ${detail.fps} fps · ${(detail.kbps / 1000).toFixed(1)} Mbps` : '';
+});
+mirror.addEventListener('audio', ({ detail }) => {
+  const btn = document.querySelector('[data-action="audio"]');
+  btn.disabled = !detail.available;
+  btn.title = detail.available ? 'Som do celular no PC' : detail.reason;
+  if (!detail.available && qualityOpts().audio) toast(detail.reason);
 });
 mirror.addEventListener('notice', ({ detail }) => toast(detail, true));
 mirror.addEventListener('clipboard', async ({ detail: text }) => {
@@ -204,6 +211,7 @@ function showNoDevice() {
 }
 
 function selectDevice(serial) {
+  if (stopRecording) actions.record(document.querySelector('[data-action="record"]'));
   current = serial;
   retries = 0;
   mirror.disconnect();
@@ -252,6 +260,14 @@ connectEvents();
 
 // ------------------------------------------------------------------ ferramentas
 let notificationsOpen = false;
+let stopRecording = null;
+let recordTimer = null;
+const download = (blob, name) => {
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
 const actions = {
   back: () => mirror.back(),
   home: () => mirror.key(3),
@@ -273,12 +289,47 @@ const actions = {
   screenshot: async () => {
     const blob = await mirror.snapshot();
     if (!blob) return toast('Nenhum quadro para capturar.', true);
-    const a = Object.assign(document.createElement('a'), {
-      href: URL.createObjectURL(blob),
-      download: `screenshot-${new Date().toISOString().replace(/[:.]/g, '-')}.png`,
-    });
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    download(blob, `screenshot-${stamp()}.png`);
+  },
+  record: async (btn) => {
+    if (stopRecording) {
+      const stop = stopRecording;
+      stopRecording = null;
+      clearInterval(recordTimer);
+      btn.setAttribute('aria-pressed', 'false');
+      btn.title = 'Gravar a tela (com som)';
+      try {
+        const { blob, ext } = await stop();
+        download(blob, `gravacao-${stamp()}.${ext}`);
+        toast('Gravação salva na pasta de downloads.');
+      } catch (err) {
+        toast(`Falha na gravação: ${err.message}`, true);
+      }
+      return;
+    }
+    if (!mirror.connected || !canvas.width) return toast('Nada para gravar: o espelho não está ativo.', true);
+    try {
+      const q = qualityOpts();
+      stopRecording = mirror.record({ fps: q.maxFps, bitRate: Math.max(q.bitRate, 8000000) });
+    } catch (err) {
+      return toast(`Este navegador não conseguiu iniciar a gravação: ${err.message}`, true);
+    }
+    const started = Date.now();
+    btn.setAttribute('aria-pressed', 'true');
+    const tick = () => {
+      const s = Math.floor((Date.now() - started) / 1000);
+      btn.title = `Gravando ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} — clique para parar e salvar`;
+    };
+    tick();
+    recordTimer = setInterval(tick, 1000);
+    toast(mirror.audio.stream ? 'Gravando tela e som.' : 'Gravando a tela (sem som).');
+  },
+  audio: (btn) => {
+    const on = btn.getAttribute('aria-pressed') !== 'true';
+    btn.setAttribute('aria-pressed', String(on));
+    btn.querySelector('.icon').dataset.icon = on ? 'speaker' : 'mute';
+    hydrateIcons(btn);
+    mirror.audio.setMuted(!on);
   },
   quality: () => {
     const form = $('quality-dialog').querySelector('form');
@@ -294,6 +345,7 @@ const actions = {
 };
 for (const btn of document.querySelectorAll('[data-action]')) {
   btn.addEventListener('click', () => {
+    mirror.audio.unlock(); // qualquer clique serve de gesto para liberar o som no navegador
     actions[btn.dataset.action]?.(btn);
     if (btn.dataset.action !== 'quality') canvas.focus();
   });
@@ -305,10 +357,11 @@ $('quality-dialog').addEventListener('close', () => {
     maxSize: Number(form.elements.maxSize.value),
     bitRate: Number(form.elements.bitRate.value),
     maxFps: Number(form.elements.maxFps.value),
+    audio: form.elements.audio.checked,
     stayAwake: form.elements.stayAwake.checked,
     showTouches: form.elements.showTouches.checked,
   };
-  store.set('quality', q);
+  store.set('quality2', q);
   if (mirror.connected) {
     setOverlay('Aplicando…', '');
     mirror.restart(q);

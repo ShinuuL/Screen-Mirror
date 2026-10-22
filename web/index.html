@@ -39,6 +39,8 @@
           <button class="tool" data-action="rotate" title="Girar tela"><span class="icon" data-icon="rotate"></span></button>
           <button class="tool" data-action="notifications" title="Painel de notificações"><span class="icon" data-icon="bell"></span></button>
           <button class="tool" data-action="screenshot" title="Salvar captura (PNG)"><span class="icon" data-icon="camera"></span></button>
+          <button class="tool" data-action="record" title="Gravar a tela (com som)" aria-pressed="false"><span class="icon" data-icon="record"></span></button>
+          <button class="tool" data-action="audio" title="Som do celular no PC" aria-pressed="true"><span class="icon" data-icon="speaker"></span></button>
           <button class="tool" data-action="displayoff" title="Apagar a tela física (o espelho continua)" aria-pressed="false"><span class="icon" data-icon="moon"></span></button>
           <button class="tool" data-action="quality" title="Qualidade do vídeo"><span class="icon" data-icon="sliders"></span></button>
         </nav>
@@ -130,15 +132,17 @@
         <select name="maxSize">
           <option value="1024">1024 px (leve)</option>
           <option value="1600">1600 px</option>
-          <option value="1920" selected>1920 px</option>
-          <option value="0">Nativa</option>
+          <option value="1920">1920 px</option>
+          <option value="0" selected>Nativa (letras pequenas mais nítidas)</option>
         </select>
       </label>
       <label>Taxa de bits
         <select name="bitRate">
           <option value="4000000">4 Mbps</option>
-          <option value="8000000" selected>8 Mbps</option>
-          <option value="16000000">16 Mbps</option>
+          <option value="8000000">8 Mbps</option>
+          <option value="16000000" selected>16 Mbps</option>
+          <option value="24000000">24 Mbps</option>
+          <option value="32000000">32 Mbps (máxima nitidez)</option>
         </select>
       </label>
       <label>Quadros por segundo
@@ -147,6 +151,7 @@
           <option value="60" selected>60</option>
         </select>
       </label>
+      <label class="check"><input type="checkbox" name="audio"> Transmitir o áudio do celular (Android 11+)</label>
       <label class="check"><input type="checkbox" name="stayAwake"> Manter tela acordada enquanto espelha</label>
       <label class="check"><input type="checkbox" name="showTouches"> Mostrar toques no aparelho</label>
       <div class="dialog-actions">

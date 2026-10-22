@@ -62,7 +62,11 @@ npm run serve      # só o servidor: http://127.0.0.1:7380
 | Copiar no celular | Vai automaticamente para a área de transferência do PC |
 | Arrastar arquivos para a janela | `.apk` é instalado; os demais vão para a pasta aberta na aba Arquivos |
 
-A barra lateral tem energia, volume, girar, notificações, captura (PNG), apagar a tela física mantendo o espelho e qualidade do vídeo (resolução, taxa de bits, FPS).
+A barra lateral tem energia, volume, girar, notificações, captura (PNG), gravação da tela com som (MP4, ou WebM se o navegador não gravar MP4), liga/desliga do som do celular no PC, apagar a tela física mantendo o espelho e qualidade do vídeo (resolução, taxa de bits, FPS, áudio).
+
+O áudio do celular é transmitido para o PC (Opus, requer Android 11+; em versões anteriores o espelho segue sem som). No Android 13+ o som deixa de sair pelo alto-falante do celular enquanto é transmitido. O navegador só libera o som após o primeiro clique na página.
+
+O padrão é resolução **nativa** a 16 Mbps, para que letras pequenas fiquem legíveis; se o vídeo travar, reduza em **Qualidade**.
 
 Vários aparelhos podem ficar conectados ao mesmo tempo; escolha qual espelhar no seletor do topo. O painel reconecta sozinho quando o cabo é recolocado.
 

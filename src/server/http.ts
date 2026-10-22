@@ -271,6 +271,7 @@ export async function startServer(host: string, port: number): Promise<ServerHan
             maxSize: opt('maxSize'),
             bitRate: opt('bitRate'),
             maxFps: opt('maxFps'),
+            audio: p.get('audio') === '1',
             stayAwake: p.get('stayAwake') === '1',
             showTouches: p.get('showTouches') === '1',
           });

@@ -8,7 +8,7 @@ interface Viewer {
   needKey: boolean;
 }
 
-const KIND = { config: 0, key: 1, delta: 2 } as const;
+const KIND = { config: 0, key: 1, delta: 2, audioConfig: 3, audio: 4 } as const;
 const MAX_GOP_BYTES = 32 * 1024 * 1024;
 const MAX_VIEWER_BUFFER = 1024 * 1024; // acima disso o espectador está atrasado: pula até o próximo keyframe
 const IDLE_STOP_MS = 10_000;
@@ -30,6 +30,7 @@ class DeviceMirror {
   private starting: Promise<void> | null = null;
   private viewers = new Set<Viewer>();
   private config: Buffer | null = null;
+  private audioConfig: Buffer | null = null;
   private gop: Buffer[] = [];
   private gopBytes = 0;
   private gopValid = false;
@@ -84,12 +85,15 @@ class DeviceMirror {
 
   private async startSession(): Promise<void> {
     this.config = null;
+    this.audioConfig = null;
     this.gop = [];
     this.gopBytes = 0;
     this.gopValid = false;
     const session = new ScrcpySession(this.serial, { ...this.opts, video: true, control: true });
     session.on('packet', (p: VideoPacket) => this.onPacket(p));
     session.on('session', (s: { width: number; height: number }) => this.broadcast({ type: 'size', ...s }));
+    session.on('audio', (p: VideoPacket) => this.onAudio(p));
+    session.on('audioUnavailable', (reason: string) => !session.closed && this.broadcast({ type: 'audio', available: false, reason }));
     session.on('clipboard', (text: string) => this.broadcast({ type: 'clipboard', text }));
     session.on('log', (line: string) => process.stderr.write(`[scrcpy ${this.serial}] ${line}\n`));
     session.on('close', (reason: string) => {
@@ -108,6 +112,7 @@ class DeviceMirror {
     const s = this.session;
     if (!s) return;
     send(v.ws, { type: 'init', serial: this.serial, deviceName: s.deviceName, codec: s.codec, width: s.width, height: s.height, opts: s.opts });
+    if (this.audioConfig) v.ws.send(this.audioConfig);
     if (this.config && this.gopValid && this.gop.length) {
       v.ws.send(this.config);
       for (const f of this.gop) v.ws.send(f);
@@ -152,6 +157,16 @@ class DeviceMirror {
         if (this.config) v.ws.send(this.config);
         v.needKey = false;
       }
+      v.ws.send(f);
+    }
+  }
+
+  private onAudio(p: VideoPacket): void {
+    const f = frame(p.config ? KIND.audioConfig : KIND.audio, p.pts, p.data);
+    if (p.config) this.audioConfig = f;
+    for (const v of this.viewers) {
+      // Áudio atrasado não serve para nada: espectador congestionado perde o pacote.
+      if (v.ws.readyState !== v.ws.OPEN || (!p.config && v.ws.bufferedAmount > MAX_VIEWER_BUFFER)) continue;
       v.ws.send(f);
     }
   }

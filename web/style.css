@@ -186,6 +186,9 @@ button, input, select { font: inherit; color: inherit; }
 .tool { width: 40px; height: 40px; }
 .tool:hover, .nav:hover, .icon-btn:hover { border-color: var(--accent); }
 .tool[aria-pressed="true"], .icon-btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.tool[data-action="record"][aria-pressed="true"] { background: #e5484d; border-color: #e5484d; color: #fff; animation: rec-pulse 1.6s ease-in-out infinite; }
+@keyframes rec-pulse { 50% { opacity: .65; } }
+@media (prefers-reduced-motion: reduce) { .tool[data-action="record"][aria-pressed="true"] { animation: none; } }
 .navbar { display: flex; justify-content: center; gap: 28px; }
 .nav { width: 64px; height: 36px; border-radius: 999px; }
 .stats { text-align: center; font-size: 11px; color: var(--muted); min-height: 16px; font-variant-numeric: tabular-nums; }

@@ -3,6 +3,10 @@
 
 const KIND_CONFIG = 0;
 const KIND_KEY = 1;
+const KIND_AUDIO_CONFIG = 3;
+const KIND_AUDIO = 4;
+// Acima disso o som está atrasado em relação à imagem: descarta e recomeça colado no tempo real.
+const AUDIO_MAX_LAG = 0.25;
 const ACTION = { DOWN: 0, UP: 1, MOVE: 2 };
 
 // KeyboardEvent.code -> keycode Android
@@ -15,6 +19,96 @@ for (let i = 0; i < 26; i++) KEYMAP['Key' + String.fromCharCode(65 + i)] = 29 + 
 for (let i = 0; i < 10; i++) KEYMAP['Digit' + i] = 7 + i;
 
 const META = { shift: 0x41, ctrl: 0x3000, alt: 0x12 };
+
+/**
+ * Decodifica o Opus do aparelho (WebCodecs) e toca num AudioContext. A saída também fica
+ * disponível como MediaStream (`stream`) para a gravação incluir o som.
+ */
+class AudioPlayer {
+  constructor() {
+    this.ctx = null;
+    this.gain = null;
+    this.dest = null;
+    this.decoder = null;
+    this.head = null; // OpusHead do aparelho
+    this.playAt = 0;
+    this.muted = false;
+  }
+
+  get supported() {
+    return 'AudioDecoder' in window;
+  }
+
+  /** Cria/retoma o AudioContext — navegadores só permitem após um gesto do usuário. */
+  unlock() {
+    if (!this.supported) return;
+    if (!this.ctx) {
+      this.ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' });
+      this.gain = this.ctx.createGain();
+      this.gain.gain.value = this.muted ? 0 : 1;
+      this.dest = this.ctx.createMediaStreamDestination();
+      this.gain.connect(this.ctx.destination);
+      this.gain.connect(this.dest);
+    }
+    if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+  }
+
+  get stream() {
+    return this.dest?.stream ?? null;
+  }
+
+  setMuted(muted) {
+    this.muted = muted;
+    if (this.gain) this.gain.gain.value = muted ? 0 : 1;
+  }
+
+  configure(head) {
+    this.head = head;
+    this.reset();
+  }
+
+  reset() {
+    if (this.decoder && this.decoder.state !== 'closed') this.decoder.close();
+    this.decoder = null;
+    this.playAt = 0;
+  }
+
+  decode(pts, data) {
+    if (!this.supported || !this.head || !this.ctx || this.ctx.state !== 'running') return;
+    if (!this.decoder) {
+      this.decoder = new AudioDecoder({
+        output: (frame) => this.play(frame),
+        error: (err) => {
+          console.error('AudioDecoder:', err);
+          this.reset();
+        },
+      });
+      this.decoder.configure({ codec: 'opus', sampleRate: 48000, numberOfChannels: 2, description: this.head });
+    }
+    if (this.decoder.state !== 'configured') return;
+    this.decoder.decode(new EncodedAudioChunk({ type: 'key', timestamp: pts, data }));
+  }
+
+  play(frame) {
+    const n = frame.numberOfFrames;
+    const channels = frame.numberOfChannels;
+    const buffer = this.ctx.createBuffer(channels, n, frame.sampleRate);
+    for (let c = 0; c < channels; c++) {
+      const plane = new Float32Array(n);
+      frame.copyTo(plane, { planeIndex: c, format: 'f32-planar' });
+      buffer.copyToChannel(plane, c);
+    }
+    frame.close();
+    const now = this.ctx.currentTime;
+    // Pequena folga (40 ms) absorve a variação de chegada dos pacotes pelo USB.
+    if (this.playAt < now || this.playAt - now > AUDIO_MAX_LAG) this.playAt = now + 0.04;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(this.gain);
+    src.start(this.playAt);
+    this.playAt += buffer.duration;
+  }
+}
 
 /** Extrai "avc1.PPCCLL" do SPS (NAL tipo 7) de um pacote Annex B. */
 function codecFromConfig(data) {
@@ -49,6 +143,7 @@ export class Mirror extends EventTarget {
     this.serial = null;
     this.opts = {};
     this.statsTimer = null;
+    this.audio = new AudioPlayer();
     // GPU quando a máquina tiver decodificador H.264 por hardware; senão software (ainda rápido).
     this.hwAccel = 'no-preference';
     window.VideoDecoder?.isConfigSupported({ codec: 'avc1.42e01f', hardwareAcceleration: 'prefer-hardware' })
@@ -120,6 +215,9 @@ export class Mirror extends EventTarget {
         this.width = msg.width;
         this.height = msg.height;
         break;
+      case 'audio':
+        if (!msg.available) this.emit('audio', { available: false, reason: msg.reason });
+        break;
       case 'clipboard':
         this.emit('clipboard', msg.text);
         break;
@@ -138,6 +236,7 @@ export class Mirror extends EventTarget {
   resetDecoder() {
     if (this.decoder && this.decoder.state !== 'closed') this.decoder.close();
     this.decoder = null;
+    this.audio.reset();
     this.needConfigure = Boolean(this.config);
     this.waitingKey = true;
   }
@@ -165,6 +264,12 @@ export class Mirror extends EventTarget {
     const data = buf.subarray(9);
     this.bytes += buf.length;
 
+    if (kind === KIND_AUDIO_CONFIG) {
+      this.audio.configure(data.slice());
+      this.emit('audio', { available: true });
+      return;
+    }
+    if (kind === KIND_AUDIO) return this.audio.decode(pts, data);
     if (kind === KIND_CONFIG) {
       this.config = data;
       this.needConfigure = true;
@@ -255,6 +360,7 @@ export class Mirror extends EventTarget {
 
     c.addEventListener('pointerdown', (ev) => {
       if (!this.connected) return;
+      this.audio.unlock();
       c.focus();
       if (ev.button === 2) return this.back();
       if (ev.button === 1) return this.key(3);
@@ -321,6 +427,35 @@ export class Mirror extends EventTarget {
       const meta = (ev.shiftKey ? META.shift : 0) | (ctrl ? META.ctrl : 0) | (ev.altKey ? META.alt : 0);
       this.send({ t: 'key', a: ACTION.UP, code, meta });
     });
+  }
+
+  /**
+   * Grava o espelho (imagem do canvas + som do aparelho, se houver) com MediaRecorder.
+   * Retorna uma função que encerra a gravação e resolve com o arquivo.
+   */
+  record({ fps = 60, bitRate = 12_000_000 } = {}) {
+    const stream = this.canvas.captureStream(fps);
+    const audio = this.audio.stream;
+    if (audio) for (const t of audio.getAudioTracks()) stream.addTrack(t);
+    // MP4 abre em qualquer player; WebM fica como alternativa para navegadores sem MP4.
+    const types = ['video/mp4;codecs=avc1.640033,opus', 'video/mp4;codecs=avc1,opus', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm'];
+    const mimeType = types.find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
+    const rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: bitRate, audioBitsPerSecond: 128_000 });
+    const chunks = [];
+    rec.ondataavailable = (ev) => ev.data.size && chunks.push(ev.data);
+    const done = new Promise((resolve, reject) => {
+      rec.onstop = () => {
+        for (const t of stream.getVideoTracks()) t.stop();
+        const type = rec.mimeType || mimeType || 'video/webm';
+        resolve({ blob: new Blob(chunks, { type }), ext: type.startsWith('video/mp4') ? 'mp4' : 'webm' });
+      };
+      rec.onerror = (ev) => reject(ev.error ?? new Error('Falha na gravação.'));
+    });
+    rec.start(1000);
+    return () => {
+      if (rec.state !== 'inactive') rec.stop();
+      return done;
+    };
   }
 
   /** PNG do quadro atual, sem round-trip ao aparelho. */

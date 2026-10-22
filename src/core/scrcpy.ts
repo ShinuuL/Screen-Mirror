@@ -179,6 +179,8 @@ export const Control = {
 
 export interface ScrcpyOptions {
   video?: boolean;
+  /** Áudio do aparelho (Opus). Exige Android 11+; em versões antigas o vídeo segue sem som. */
+  audio?: boolean;
   control?: boolean;
   /** Maior dimensão do vídeo (0 = nativa). */
   maxSize?: number;
@@ -205,7 +207,8 @@ export const CODEC_NAMES: Record<number, string> = { 0x68323634: 'h264', 0x68323
 
 /**
  * Uma conexão com o scrcpy-server.
- * Eventos: 'meta' (deviceName), 'session' ({width,height}), 'packet' (VideoPacket),
+ * Eventos: 'meta' (deviceName), 'session' ({width,height}), 'packet' (VideoPacket), 'audio' (VideoPacket Opus),
+ * 'audioUnavailable' (motivo),
  * 'clipboard' (texto), 'ack' (bigint), 'log' (linha do servidor), 'close' (motivo).
  */
 export class ScrcpySession extends EventEmitter {
@@ -214,6 +217,8 @@ export class ScrcpySession extends EventEmitter {
   readonly scid = randomInt(1, 0x7fffffff);
   deviceName = '';
   codec = '';
+  /** '' enquanto não houver áudio (desligado, Android < 11 ou captura recusada). */
+  audioCodec = '';
   width = 0;
   height = 0;
   closed = false;
@@ -221,6 +226,7 @@ export class ScrcpySession extends EventEmitter {
 
   private proc: ChildProcess | null = null;
   private videoSocket: net.Socket | null = null;
+  private audioSocket: net.Socket | null = null;
   private controlSocket: net.Socket | null = null;
   private port = 0;
   private procExit: string | null = null;
@@ -230,6 +236,7 @@ export class ScrcpySession extends EventEmitter {
     this.serial = serial;
     this.opts = {
       video: opts.video ?? true,
+      audio: opts.audio ?? false,
       control: opts.control ?? true,
       maxSize: opts.maxSize ?? 1920,
       bitRate: opts.bitRate ?? 8_000_000,
@@ -244,13 +251,17 @@ export class ScrcpySession extends EventEmitter {
     return `scrcpy_${this.scid.toString(16).padStart(8, '0')}`;
   }
 
+  private get audioOn(): boolean {
+    return this.opts.video && this.opts.audio;
+  }
+
   private serverArgs(): string[] {
     const o = this.opts;
     const args = [
       `scid=${this.scid.toString(16).padStart(8, '0')}`,
       'log_level=info',
       'tunnel_forward=true',
-      'audio=false',
+      `audio=${this.audioOn}`,
       `video=${o.video}`,
       `control=${o.control}`,
       'cleanup=true',
@@ -259,6 +270,8 @@ export class ScrcpySession extends EventEmitter {
     if (o.video) {
       args.push('video_codec=h264', `max_size=${o.maxSize}`, `video_bit_rate=${o.bitRate}`, `max_fps=${o.maxFps}`);
     }
+    // require_audio=false (padrão): se a captura falhar, o servidor avisa no socket e o vídeo continua.
+    if (this.audioOn) args.push('audio_codec=opus', 'audio_bit_rate=128000');
     if (o.stayAwake) args.push('stay_awake=true');
     if (o.showTouches) args.push('show_touches=true');
     return args;
@@ -298,6 +311,8 @@ export class ScrcpySession extends EventEmitter {
     try {
       const first = await this.connectFirst();
       const firstIsVideo = this.opts.video;
+      // Ordem dos sockets no servidor: vídeo, áudio, controle.
+      const audio = this.audioOn ? await this.connectPlain() : null;
       let control: { socket: net.Socket; queue: ByteQueue } | null = null;
       if (this.opts.video && this.opts.control) control = await this.connectPlain();
       // Como o cliente oficial: o forward não é mais necessário depois de conectado.
@@ -307,6 +322,10 @@ export class ScrcpySession extends EventEmitter {
       if (firstIsVideo) {
         this.videoSocket = first.socket;
         this.attachVideo(first.socket, first.queue);
+        if (audio) {
+          this.audioSocket = audio.socket;
+          this.attachAudio(audio.socket, audio.queue);
+        }
         if (control) {
           this.controlSocket = control.socket;
           this.attachControl(control.socket, control.queue, false);
@@ -459,6 +478,53 @@ export class ScrcpySession extends EventEmitter {
     drain();
   }
 
+  /** Mesmo formato de pacote do vídeo, sem metadados do aparelho e sem pacotes de sessão. */
+  private attachAudio(socket: net.Socket, q: ByteQueue): void {
+    let state: 'codec' | 'header' | 'body' | 'off' = 'codec';
+    let pending = { config: false, pts: 0n, size: 0 };
+
+    const drain = () => {
+      for (;;) {
+        if (state === 'off') return void q.read(q.length);
+        if (state === 'codec') {
+          if (q.length < 4) return;
+          const id = q.read(4).readUInt32BE(0);
+          if (id === 0 || id === 1) {
+            // Não derruba a sessão: o espelho continua sem som.
+            const reason = id === 0 ? 'Áudio indisponível neste aparelho (requer Android 11+).' : 'Falha ao capturar o áudio do aparelho.';
+            this.emit('log', reason);
+            this.emit('audioUnavailable', reason);
+            state = 'off';
+            continue;
+          }
+          this.audioCodec = id === 0x6f707573 ? 'opus' : `0x${id.toString(16)}`;
+          state = 'header';
+        } else if (state === 'header') {
+          if (q.length < 12) return;
+          const h = q.read(12);
+          const ptsFlags = h.readBigUInt64BE(0);
+          pending = { config: (ptsFlags & FLAG_CONFIG) !== 0n, pts: ptsFlags & PTS_MASK, size: h.readUInt32BE(8) };
+          state = 'body';
+        } else {
+          if (q.length < pending.size) return;
+          const data = q.read(pending.size);
+          state = 'header';
+          this.emit('audio', { config: pending.config, key: true, pts: pending.pts, data } satisfies VideoPacket);
+        }
+      }
+    };
+
+    socket.on('data', (chunk: Buffer) => {
+      q.push(chunk);
+      drain();
+    });
+    // Se o áudio cair sozinho, o vídeo segue; o fim da sessão vem pelos outros sockets.
+    socket.on('close', () => this.emit('audioUnavailable', 'Transmissão de áudio encerrada.'));
+    socket.on('error', () => {});
+    socket.resume();
+    drain();
+  }
+
   private attachControl(socket: net.Socket, q: ByteQueue, hasMeta: boolean): void {
     let needMeta = hasMeta;
     const drain = () => {
@@ -514,6 +580,7 @@ export class ScrcpySession extends EventEmitter {
     if (this.closed) return;
     this.closed = true;
     this.videoSocket?.destroy();
+    this.audioSocket?.destroy();
     this.controlSocket?.destroy();
     this.proc?.kill();
     if (this.port) void run(['forward', '--remove', `tcp:${this.port}`], { serial: this.serial, allowFailure: true }).catch(() => {});
