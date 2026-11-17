@@ -1,6 +1,6 @@
 {
   "name": "screen-mirror",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Espelhamento e controle de celulares Android via ADB, com painel web local e servidor MCP para agentes de IA.",
   "type": "module",

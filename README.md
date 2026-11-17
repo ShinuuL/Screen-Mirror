@@ -62,7 +62,7 @@ npm run serve      # só o servidor: http://127.0.0.1:7380
 | Copiar no celular | Vai automaticamente para a área de transferência do PC |
 | Arrastar arquivos para a janela | `.apk` é instalado; os demais vão para a pasta aberta na aba Arquivos |
 
-A barra lateral tem energia, volume, girar, notificações, captura (PNG), gravação da tela com som (MP4, ou WebM se o navegador não gravar MP4), liga/desliga do som do celular no PC, apagar a tela física mantendo o espelho e qualidade do vídeo (resolução, taxa de bits, FPS, áudio).
+A barra lateral tem energia, volume, girar, notificações, captura (PNG), gravação da tela com som (MP4, ou WebM se o navegador não gravar MP4; salva pelo servidor em `~/Videos/Screen-Mirror`), liga/desliga do som do celular no PC, apagar a tela física mantendo o espelho e qualidade do vídeo (resolução, taxa de bits, FPS, áudio).
 
 O áudio do celular é transmitido para o PC (Opus, requer Android 11+; em versões anteriores o espelho segue sem som). No Android 13+ o som deixa de sair pelo alto-falante do celular enquanto é transmitido. O navegador só libera o som após o primeiro clique na página.
 
@@ -135,7 +135,7 @@ curl -X POST --data-binary @arquivo.pdf "http://127.0.0.1:7380/api/files/upload?
 curl -o saida.pdf "http://127.0.0.1:7380/api/files/download?path=/sdcard/Download/arquivo.pdf"
 ```
 
-Rotas: `GET /api/devices | info | screenshot | ui | logcat | pid | apps | current-app | files | files/download` e `POST /api/input | logcat/clear | files/upload | files/delete | files/mkdir | install`. `/api/input` aceita `tap`, `swipe`, `longPress`, `key` e `text`.
+Rotas: `GET /api/devices | info | screenshot | ui | logcat | pid | apps | current-app | files | files/download` e `POST /api/input | logcat/clear | files/upload | files/delete | files/mkdir | install | recordings/start | recordings/chunk | recordings/stop`. `/api/input` aceita `tap`, `swipe`, `longPress`, `key` e `text`.
 
 ## Latência
 
@@ -153,6 +153,7 @@ A barra sob o espelho mostra resolução, FPS e taxa atual. Com a tela parada o 
 | Variável | Padrão | Uso |
 |---|---|---|
 | `SM_PORT` | `7380` | Porta do painel (ou `--port N`) |
+| `SM_RECORDINGS_DIR` | `~/Videos/Screen-Mirror` | Onde o botão de gravação (●) do painel salva os vídeos (tela + som do celular, MP4 ou WebM conforme o navegador) |
 | `SM_HOST` | `127.0.0.1` | Interface de escuta. **Não exponha na rede**: não há autenticação |
 | `ADB_PATH` | detectado | Caminho do `adb` |
 
@@ -201,4 +202,4 @@ npm test           # testes offline: parsers, serialização do protocolo, demux
 npm run typecheck
 ```
 
-Limitações atuais: sem áudio, sem gravação de vídeo e sem conexão por Wi-Fi pelo painel. Aparelhos pareados via `adb connect`/`adb pair` aparecem normalmente, mas o pareamento é feito pela linha de comando.
+Limitações atuais: sem conexão por Wi-Fi pelo painel. Aparelhos pareados via `adb connect`/`adb pair` aparecem normalmente, mas o pareamento é feito pela linha de comando.

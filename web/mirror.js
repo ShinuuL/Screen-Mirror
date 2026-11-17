@@ -124,6 +124,16 @@ function codecFromConfig(data) {
   return 'avc1.42e01f';
 }
 
+// MP4 abre em qualquer player; WebM fica como alternativa para navegadores sem MP4.
+const RECORD_TYPES = ['video/mp4;codecs=avc1.640033,opus', 'video/mp4;codecs=avc1,opus', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm'];
+const extOf = (type) => (type.startsWith('video/mp4') ? 'mp4' : 'webm');
+
+/** Formato que o navegador vai usar para gravar: { mimeType, ext }. */
+export function recordingFormat() {
+  const mimeType = RECORD_TYPES.find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
+  return { mimeType, ext: extOf(mimeType || 'video/webm') };
+}
+
 export class Mirror extends EventTarget {
   constructor(canvas) {
     super();
@@ -432,30 +442,30 @@ export class Mirror extends EventTarget {
   /**
    * Grava o espelho (imagem do canvas + som do aparelho, se houver) com MediaRecorder.
    * Retorna uma função que encerra a gravação e resolve com o arquivo.
+   * Com `onData`, cada parte (1 s) vai para o callback em vez de ficar na memória e `blob` sai null.
    */
-  record({ fps = 60, bitRate = 12_000_000 } = {}) {
+  record({ fps = 60, bitRate = 12_000_000, onData = null } = {}) {
     const stream = this.canvas.captureStream(fps);
     const audio = this.audio.stream;
     if (audio) for (const t of audio.getAudioTracks()) stream.addTrack(t);
-    // MP4 abre em qualquer player; WebM fica como alternativa para navegadores sem MP4.
-    const types = ['video/mp4;codecs=avc1.640033,opus', 'video/mp4;codecs=avc1,opus', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm'];
-    const mimeType = types.find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
+    const { mimeType } = recordingFormat();
     const rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: bitRate, audioBitsPerSecond: 128_000 });
     const chunks = [];
-    rec.ondataavailable = (ev) => ev.data.size && chunks.push(ev.data);
+    rec.ondataavailable = (ev) => ev.data.size && (onData ? onData(ev.data) : chunks.push(ev.data));
     const done = new Promise((resolve, reject) => {
       rec.onstop = () => {
         for (const t of stream.getVideoTracks()) t.stop();
         const type = rec.mimeType || mimeType || 'video/webm';
-        resolve({ blob: new Blob(chunks, { type }), ext: type.startsWith('video/mp4') ? 'mp4' : 'webm' });
+        resolve({ blob: onData ? null : new Blob(chunks, { type }), ext: extOf(type) });
       };
       rec.onerror = (ev) => reject(ev.error ?? new Error('Falha na gravação.'));
     });
     rec.start(1000);
-    return () => {
+    const stop = () => {
       if (rec.state !== 'inactive') rec.stop();
       return done;
     };
+    return stop;
   }
 
   /** PNG do quadro atual, sem round-trip ao aparelho. */

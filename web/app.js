@@ -1,4 +1,4 @@
-import { Mirror } from './mirror.js';
+import { Mirror, recordingFormat } from './mirror.js';
 import { LogcatPanel } from './logcat.js';
 import { FilesPanel } from './files.js';
 import { hydrateIcons } from './icons.js';
@@ -268,6 +268,45 @@ const download = (blob, name) => {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 };
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
+const postJson = async (path, body) => {
+  const res = await fetch(path, { method: 'POST', body });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+};
+
+/**
+ * Gravação salva pelo servidor (SM_RECORDINGS_DIR ou ~/Videos/Screen-Mirror): cada parte
+ * de 1 s é anexada ao arquivo, em ordem. Não depende do download do navegador (que não
+ * funciona dentro de apps que embutem o painel) e o que já foi gravado sobrevive se a
+ * página fechar. Se o servidor recusar, cai no download comum.
+ */
+const serverRecording = {
+  id: null,
+  queue: Promise.resolve(),
+  failed: null,
+  async open(ext) {
+    const { id } = await postJson(`/api/recordings/start?ext=${ext}&serial=${encodeURIComponent(current ?? '')}`);
+    Object.assign(this, { id, queue: Promise.resolve(), failed: null });
+  },
+  push(blob) {
+    const id = this.id;
+    this.queue = this.queue
+      .then(() => !this.failed && postJson(`/api/recordings/chunk?id=${id}`, blob))
+      .catch((e) => (this.failed ??= e));
+  },
+  async close() {
+    await this.queue;
+    const id = this.id;
+    this.id = null;
+    const r = await postJson(`/api/recordings/stop?id=${id}`);
+    if (this.failed) throw new Error(`parte do vídeo não foi salva (${this.failed.message}). Arquivo: ${r.file ?? '—'}`);
+    return r;
+  },
+};
+window.addEventListener('pagehide', () => {
+  if (serverRecording.id) navigator.sendBeacon(`/api/recordings/stop?id=${serverRecording.id}`);
+});
 const actions = {
   back: () => mirror.back(),
   home: () => mirror.key(3),
@@ -300,8 +339,14 @@ const actions = {
       btn.title = 'Gravar a tela (com som)';
       try {
         const { blob, ext } = await stop();
-        download(blob, `gravacao-${stamp()}.${ext}`);
-        toast('Gravação salva na pasta de downloads.');
+        if (serverRecording.id) {
+          const r = await serverRecording.close();
+          if (r.file) toast(`Gravação salva em ${r.file} (${(r.size / 1048576).toFixed(1)} MB).`);
+          else toast('Nada foi gravado.', true);
+        } else {
+          download(blob, `gravacao-${stamp()}.${ext}`);
+          toast('Gravação salva na pasta de downloads.');
+        }
       } catch (err) {
         toast(`Falha na gravação: ${err.message}`, true);
       }
@@ -310,7 +355,14 @@ const actions = {
     if (!mirror.connected || !canvas.width) return toast('Nada para gravar: o espelho não está ativo.', true);
     try {
       const q = qualityOpts();
-      stopRecording = mirror.record({ fps: q.maxFps, bitRate: Math.max(q.bitRate, 8000000) });
+      const opts = { fps: q.maxFps, bitRate: Math.max(q.bitRate, 8000000) };
+      try {
+        await serverRecording.open(recordingFormat().ext);
+        stopRecording = mirror.record({ ...opts, onData: (b) => serverRecording.push(b) });
+      } catch (err) {
+        console.warn('Gravação pelo servidor indisponível, usando download:', err);
+        stopRecording = mirror.record(opts);
+      }
     } catch (err) {
       return toast(`Este navegador não conseguiu iniciar a gravação: ${err.message}`, true);
     }

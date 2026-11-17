@@ -139,7 +139,7 @@ Permitir a instalação?`,
 
 export async function startMcpServer(): Promise<void> {
   const server = new McpServer(
-    { name: 'screen-mirror', version: '0.1.0' },
+    { name: 'screen-mirror', version: '0.2.0' },
     {
       instructions: [
         'Controle de celulares Android via ADB (depuração USB).',

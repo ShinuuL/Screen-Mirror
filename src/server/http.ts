@@ -2,8 +2,8 @@
 // Escuta apenas em 127.0.0.1 e valida Host/Origin para impedir que sites externos controlem o celular.
 import http from 'node:http';
 import { createReadStream, createWriteStream, existsSync, statSync } from 'node:fs';
-import { unlink } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { unlink, mkdir, stat } from 'node:fs/promises';
+import { tmpdir, homedir } from 'node:os';
 import { join, extname, normalize, basename, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
@@ -17,6 +17,10 @@ import { MirrorHub } from './mirror.ts';
 import { loadPolicy, setPaused, POLICY_FILE } from '../core/policy.ts';
 
 const WEB_DIR = join(ROOT, 'web');
+/** Onde as gravações de tela ficam: SM_RECORDINGS_DIR ou ~/Videos/Screen-Mirror. */
+const RECORDINGS_DIR = process.env.SM_RECORDINGS_DIR || join(homedir(), 'Videos', 'Screen-Mirror');
+/** Gravações em andamento: id -> arquivo. */
+const recordings = new Map<string, string>();
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -71,7 +75,7 @@ export async function startServer(host: string, port: number): Promise<ServerHan
   };
 
   const routes: Record<string, Handler> = {
-    'GET /api/meta': async ({ res }) => json(res, 200, { root: ROOT, sep, version: '0.1.0', exe: IS_SEA ? process.execPath : null }),
+    'GET /api/meta': async ({ res }) => json(res, 200, { root: ROOT, sep, version: '0.2.0', exe: IS_SEA ? process.execPath : null }),
 
     'GET /api/agents': async ({ res }) => {
       const p = loadPolicy();
@@ -209,6 +213,36 @@ export async function startServer(host: string, port: number): Promise<ServerHan
     'POST /api/files/mkdir': async ({ res, url, serial }) => {
       await dev.makeDir(await serial(), required(url, 'path'));
       json(res, 200, { ok: true });
+    },
+
+    // Gravação da tela: o painel envia o vídeo em partes (MediaRecorder) e o arquivo
+    // vai crescendo em disco, então uma aba fechada no meio deixa o que já foi gravado.
+    'POST /api/recordings/start': async ({ res, url }) => {
+      const ext = url.searchParams.get('ext') === 'mp4' ? 'mp4' : 'webm';
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
+      const serialPart = (url.searchParams.get('serial') ?? '').replace(/[^\w.-]/g, '_').slice(0, 40);
+      await mkdir(RECORDINGS_DIR, { recursive: true });
+      const id = randomUUID();
+      const file = join(RECORDINGS_DIR, `gravacao-${stamp}${serialPart ? `-${serialPart}` : ''}.${ext}`);
+      recordings.set(id, file);
+      json(res, 200, { id, file });
+    },
+
+    'POST /api/recordings/chunk': async ({ req, res, url }) => {
+      const file = recordings.get(required(url, 'id'));
+      if (!file) throw new HttpError(404, 'Gravação desconhecida ou já encerrada.');
+      await pipeline(req, createWriteStream(file, { flags: 'a' }));
+      json(res, 200, { ok: true });
+    },
+
+    'POST /api/recordings/stop': async ({ res, url }) => {
+      const id = required(url, 'id');
+      const file = recordings.get(id);
+      if (!file) throw new HttpError(404, 'Gravação desconhecida ou já encerrada.');
+      recordings.delete(id);
+      const size = await stat(file).then((st) => st.size, () => 0);
+      if (!size) await unlink(file).catch(() => {});
+      json(res, 200, { file: size ? file : null, size });
     },
 
     'POST /api/install': async ({ req, res, url, serial }) => {
